@@ -40,12 +40,26 @@
         mkdir -p $out
         cp rapidsnark-macOS-arm64-v0.0.8/lib/*.a $out/
       '';
+      # LEZ crates embed their guest ELFs from an `artifacts/` folder above the crate
+      # (build_utils::include_artifacts), which a vendored crate has not. The setup hook puts the
+      # rc3 checkout's own artifacts at the build's top folder, above every vendored crate.
+      lezSrc = builtins.fetchGit {
+        url = "https://github.com/logos-blockchain/logos-execution-zone.git";
+        rev = "bafd07be0701398f9bc435f73ab05e9a7936c301"; # v0.4.0-rc3
+        allRefs = true;
+      };
+      lezArtifactsHook = pkgs.makeSetupHook { name = "lez-rc3-artifacts"; } (pkgs.writeText "lez-rc3-artifacts.sh" ''
+        if [ -n "''${NIX_BUILD_TOP:-}" ] && [ ! -e "$NIX_BUILD_TOP/artifacts" ]; then
+          cp -r ${lezSrc}/artifacts "$NIX_BUILD_TOP/artifacts"
+          chmod -R u+w "$NIX_BUILD_TOP/artifacts"
+        fi
+      '');
     in
     logos-module-builder.lib.mkLogosModule {
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
-      rustExtraNativeBuildInputs = [ systemXcrun ];
+      rustExtraNativeBuildInputs = [ systemXcrun lezArtifactsHook ];
       # risc0's kernel build keeps a cache under $HOME, which a nix build has read-only.
       rustEnv = {
         HOME = "/private/tmp/vest-module-build-home";
