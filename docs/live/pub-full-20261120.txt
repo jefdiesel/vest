@@ -1,0 +1,14 @@
+PASS fund-B  :: 
+PASS balance-C  :: native 28431410 
+PASS deploy-token  :: program d3116a21a92edc916e96a757c8cb4712018d9be7456e4f2e9bdefcac51661ea5 image 223b3cef442ed5b2a2b2193f3ee12c0c6ebe42a77be4dabca39ecc7b27b1c146 
+PASS token-new tx 1544c5f8a69660de0e58858ee40d8cd8752c16fa82af09d6805f60ec0d26e70b block 39023 clock 1795198627701 :: definition 9fd3ff930eef533464e2d85b3ec76e3037818694d4a86d626990f8b05db72fe2 
+PASS token-init-B tx fd9a97622e37f5ccae89b11353737b7711015954d8014c6d8e44dcc9496d8ae7 block 39024 clock 1795198642702 :: 
+PASS create-token tx 2c46674e6f3bbbfd2b172803eb458929db2a6e8cac931c329022ed2a25e5f3e9 block 39025 clock 1795198657702 :: created schedule 0 
+PASS claim-token-public tx b26cf0fbb18c2897add07579c03d6750bc7c745ef955b56d5a69603d1b35ff21 block 39026 clock 1795198672701 :: claimed 208187 
+PASS claim-token-private tx c5d782913d8819b009c8d15815697b20a59b71f2568d2cd976165af267b7b8fd block 39066 clock 1795199272775 :: claimed 45452 
+PASS balance-P2  :: native 366088 token 45452 
+PASS create-batch tx 8083542ac3c040963667adb74248f2b29dfd25a6188b688699f0c59c22d0f0ee block 39067 clock 1795199287775 :: created schedule 1 created schedule 2 created schedule 3 
+PASS cancel-token tx 9389052d3d4e1950fa9c2cc2bbb22f12b6da563a88a083a7762ae50b5540fd87 block 39068 clock 1795199302774 :: refunded 0 to the creator 
+PASS claim-token-rest tx 0c1624a38e3365e4d10406a978b717872eedbc0f2be7982ca71ed7bdd84b8bc0 block 39069 clock 1795199317773 :: claimed 1746361 
+PASS balance-C-end  :: native 12255810 token 999998000000 
+PASS show-token  :: 
