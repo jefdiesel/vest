@@ -1,0 +1,44 @@
+creator 6iArKUXxhUJqS7kCaPNhwMWt3ro71PDyBj7jwAyE2VQV beneficiary FKpjmBqjFHSzXxWPKbMjCbj56bhBFtfNg9xmqzbvb3Y4 new beneficiary HHQzMhtAEM6pBSu7UJhWtkbS8xH1c2rr6HGXwmxb7vB3 private 78N5VeS6P26QxcMezK9EaHY5cisLxePyy7bAnzjhTCfF AH32NjJcTh716mzLhgpKDMAyo36nWztL9QtnfZG6oPru
+PASS deploy-vesting  :: program 47398cee113150b283359e1f3f1a08c3425de0988ae83ba909b23fc2ab2d02fc 
+PASS deploy-token  :: program 12e8998e29f1159f65e53d95b2abb3e72f12b490324d84042c86e3f465574dab 
+PASS token-new tx 8914f0be03728b29d179a026b358c5c3fb3b7ff934ba0e7d26712f169bf7f296 block 39 :: definition 94d778822116ac7d3744a05b15dd58dda544a599799979a4b340eb3c4ee32292 
+PASS token-init-B tx 8b63fd6a45bd595268994f53278e52d3ea981220b0f69eeb178142a1f1c681e4 block 43 :: 
+PASS create-linear tx bb529e92f3a6649875b09037245890c5006f78b3018a9ecf4150ed128935f395 block 47 :: created schedule 0 
+PASS summary-public  :: estimated fee: 341088 native LEZ, paid by the claiming public account (reserve 425032) fee check: ok (the payer will have 49754240) 
+PASS claim-public tx 3f4cd4306e524c1178ba9468f948ada64e7ee3acd097b6e42c5afc76c74bbb50 block 51 :: claimed 197855555 
+PASS summary-private-native  :: estimated fee: 5406392 native LEZ, paid by the private destination, from what the claim brings it (reserve 5406392) fee check: ok (the payer will have 33333333) 
+PASS claim-private-native tx 0e7fbe6a77573d2c5c18ccdbf10c80fe97de0fcd2da3fe8ce1cc0b5485cc0ae7 block 55 :: estimated fee: 5406392 native LEZ, paid by the private destination, from what the claim brings it (reserve 5406392) fee check: ok (the payer will have 33333333) 
+PASS balance-P1  :: 
+PASS create-cliff tx a714918eab14d098024736d6b9ce4b5f32369b6e0c70c711055d3f6e89ed7318 block 59 :: created schedule 1 
+PASS claim-before-cliff  :: error: Nothing is claimable yet: the cliff is at 1795205259000 ms. The whole accrued amount unlocks then. (code 9) 
+PASS claim-after-cliff tx 610448a9b4bd9dd145d45d120585a60b9e0e1d848595ca499a067657a6fc3199 block 73 :: claimed 823409 
+PASS cancel tx d7ca1f4116ec813658a908c96832205a6a7fd97b9b647b4e699d9e168e20d909 block 77 :: refunded 8979886 to the creator 
+PASS cancel-again  :: error: This schedule has already been cancelled. (code 15) 
+PASS claim-after-cancel tx fb94ba9a825b88ad5ad5aeca1f52eb002fd13071ed67709c8afa99530efa889d block 82 :: claimed 196705 
+PASS show-cancelled  :: 
+PASS create-milestone tx 195388116764887b70c4edeeae805543347445826d7139f8fa03a701740ee411 block 86 :: created schedule 2 
+PASS claim-before-signal  :: error: Nothing is claimable yet: waiting for the milestone authority to signal the next tranche. (code 9) 
+PASS signal-0 tx b74de1dc5a1fb10da38485e38697b52da7ee2e4e7a8414aa91dd79fb4aa46362 block 90 :: signalled milestone 0: unlocked 3000000 
+PASS signal-0-again  :: error: Milestone 0 was already signalled; it cannot unlock twice. (code 18) 
+PASS claim-tranche-0 tx 0ee2711254720593089200d7ed715220a873b50ff31fbda4768038218456f6e0 block 94 :: claimed 3000000 
+PASS make-irrevocable tx c3011eb82e9bf0ce65b497ace08b2eb22166593647acb83627163bc7df76c9b5 block 98 :: schedule 2 is now irrevocable 
+PASS cancel-irrevocable  :: error: This schedule is irrevocable and cannot be cancelled. (code 14) 
+PASS transfer tx 342fa61fe68033d865f57af43bbd58d800c4f4e15ce1ea459920ee36bd3c6c11 block 102 :: beneficiary of schedule 2 is now HHQzMhtAEM6pBSu7UJhWtkbS8xH1c2rr6HGXwmxb7vB3 
+PASS signal-1 tx 403a0dea7f2fc859c1568b5f7a67ab78085261617560cc1185b1745458ca2161 block 106 :: signalled milestone 1: unlocked 2000000 
+PASS claim-old-beneficiary  :: error: Only the current beneficiary may claim or transfer this position. (code 10) 
+PASS claim-new-beneficiary tx a5a985cf3de32c57bb92dbeab77162d230f0c2a0d6dd03f0d5440d24d9f2e3f6 block 110 :: claimed 2000000 
+PASS create-authorities tx a90f9013882d4f832cdba0b83e98a66fa54a60cddd1fdff67df4153e579fe274 block 114 :: created schedule 3 
+PASS signal-by-creator  :: error: Only the milestone authority may signal milestones on this schedule. (code 12) 
+PASS signal-by-authority tx 609029c5b078a286a951a1297b8c1a7246266e2e975ee39be207d8439c163784 block 118 :: signalled milestone 0: unlocked 1000000 
+PASS cancel-by-creator  :: error: Only the cancellation authority may cancel this schedule or make it irrevocable. (code 11) 
+PASS cancel-by-authority tx 9bcec1c80d04df201ba2b6e41c334696eeffa1ffbdf1051b4ffc1f2da545cbe8 block 122 :: refunded 3000000 to the creator 
+PASS claim-after-authority-cancel tx 7da405062987371a55357811f73b1dd43d7f355d0a6e58bee7edbaa2a5f42b80 block 126 :: claimed 1000000 
+PASS create-batch tx 7563ab427f3d1ac9c98d0b6c07b4308c41218884dcd781c0410890ad09cbea4d block 130 :: created schedule 4 created schedule 5 
+PASS create-token tx ac407ffbcdd9c259328f66d99a3c8b429a04aa00e6ea408645e405d19f8cfd83 block 134 :: created schedule 7 
+PASS claim-token-public tx 842ede69d72e8538188149f54285592d2a59635a82ea5a2b797316484c50b674 block 138 :: claimed 63840909 
+PASS summary-token-private  :: estimated fee: 5637880 native LEZ, paid by the private destination, from what the claim brings it (reserve 5637880) fee check: ok (the payer will have 12000000) 
+PASS claim-token-private tx 2e84730edcb28351c3b1e8284c867f689fd4c0812f2635252f0025c3904789d4 block 142 :: estimated fee: 5637880 native LEZ, paid by the private destination, from what the claim brings it (reserve 5637880) fee check: ok (the payer will have 12000000) 
+PASS balance-P2  :: 
+PASS cancel-token tx ee9f2f06d94f52a8f5bc37659362897ed2cba4f62327db36bcc43d5fd1dcf815 block 147 :: refunded 511612728 to the creator 
+PASS claim-token-rest tx efd44508dd21364f161a648074fe184a3d46211c76ee23e45188bdd50e20a97d block 151 :: claimed 13636363 
+PASS balance-creator  :: 
