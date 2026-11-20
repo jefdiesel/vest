@@ -14,25 +14,27 @@ Licence: MIT OR Apache-2.0.
 | `core/` (`vesting-core`) | Every vesting rule: schedule maths, state, all transitions as pure functions, stable error codes, borsh events. No LEZ dependency. |
 | `program/` (`vesting-program`) | The LEZ v0.4.0-rc3 program. It routes messages, reads the clock, stores the core `Schedule` and moves native LEZ or 0.4 tokens from a per-schedule escrow; one event per transition. |
 | `methods/` | Guest builds (risc0): the program, and the 0.4 token program (logos-blockchain/lez-programs `cad71fc`) for tests and deployments. |
-| `sdk/` (`vesting-sdk`) | `Client` with the full lifecycle and the `Backend` trait; feature `lez` adds `LezBackend`, which talks to the program through a LEZ wallet (public and private claims, deploy, token helpers, dry runs). |
+| `sdk/` (`vesting-sdk`) | `Client` with the full lifecycle and the `Backend` trait, including the pre-claim summary with the claim's simulated fee; feature `lez` adds `LezBackend`, which talks to the program through a LEZ wallet (public and private claims, dry runs, deploy, token helpers); feature `names` the LNS resolver. |
 | `cli/` (`vesting-cli`) | The `vesting` binary: a JSON-file backend for trying the rules offline, the chain with `--network`/`--wallet` (feature `lez`); LNS names accepted for every account. |
 | `idl/`, `idl-check/` | The SPEL v2 IDL of the program, checked byte for byte against the program's own encoding. |
-| `miniapp/` | Basecamp mini-app (QML + a Rust module over the SDK; feature `lez` for the chain). |
+| `miniapp/` | Basecamp packages: the `vesting` core module (`miniapp/module`, Rust over the SDK on the chain) and the `vesting_ui` app (QML). |
 | `web/viewer/` | A static, read-only page that reads a schedule from the chain and shows vested, claimable, locked and the next unlock. |
 | `e2e/`, `scripts/` | End to end on an in-process standalone rc3 sequencer driving `scripts/e2e.sh` (CI: `.github/workflows/e2e.yml`); measurement and public-chain smoke scripts. |
 | `vendor/logos-sdk/` | The `lns`, `rpc` and `accounts` crates of logos-sdk, vendored for LNS name resolution. |
 
 Documentation: [program IDL](docs/IDL.md) · [events](docs/EVENTS.md) · [costs and batch limit](docs/COSTS.md) ·
 [reliability tests](docs/RELIABILITY-TESTS.md) · [SPEL notes](docs/SPEL-GAP.md) ·
-[RFP-017 requirements → evidence](docs/REQUIREMENTS-MAP.md).
+[Basecamp click-through test](docs/BASECAMP-TEST.md) · [RFP-017 requirements → evidence](docs/REQUIREMENTS-MAP.md).
 
 ## Build and test
 
+As CI's unit job runs them (no risc0 toolchain needed):
+
 ```sh
-cargo test --workspace --exclude vesting-e2e --exclude vesting_guest --exclude token_guest
 cargo fmt --all -- --check
-node --test web/viewer/test/logic.test.mjs miniapp/logic.test.mjs
-cargo test --manifest-path miniapp/module/rust-lib/Cargo.toml
+cargo test -p vesting-core -p vesting-sdk -p vesting-cli -p vesting-program -p idl-check \
+  -p vesting-module-core -p logos-lns -p logos-rpc -p logos-accounts
+node --test web/viewer/test/logic.test.mjs miniapp/logic.test.mjs reference/faucet-miniapp/logic.test.mjs
 ```
 
 The program's guests and the LEZ backend need the risc0 toolchain (`rzup install rust`,
@@ -56,7 +58,8 @@ SEQ_BIN=... LOCAL_JSON=... VESTING_BIN=target/release/vesting VESTING_ELF=... TO
 Without `--network`/`--wallet` the CLI keeps schedules and events in a JSON state file and moves
 no tokens: it is for trying the rules. `--state <path>` picks the file
 (default `vesting-state.json`) and `--now <milliseconds>` overrides the clock so you can
-reproduce cliff dates and unlocks. Accounts are 32-byte addresses written as 64 hex characters.
+reproduce cliff dates and unlocks. Accounts are 32-byte addresses written as 64 hex characters
+(or base58), or LNS names (below).
 
 Below, `ALICE` is the creator/cancel authority, `BOB` the beneficiary, `TOKEN` the token
 definition and `PRIV` a private (shielded) destination account:
@@ -175,16 +178,23 @@ client.claim_private(id, beneficiary, AccountRef::private(shielded_account))?;
 ```
 
 `claim_private` refuses a public target with `SdkError::TargetNotPrivate` (code 1001) before any
-state change. The fee in `PreClaimSummary` is a placeholder until the program exposes a real
-estimate.
+state change. `pre_claim_summary(id, caller, destination)` simulates the very claim the client
+would send (`Backend::estimate_fee`; on LEZ the wallet's dry run, nothing proven or sent) and
+returns its fee, who pays it (the caller's public account, or for a private claim the private
+destination, from what the claim brings it) and `fee_covered`, whether that payer will hold
+enough. A local ledger charges no fee (`fee: None`). The CLI prints it with
+`vesting summary <id> [--to-private <account>]` and refuses a private claim whose destination
+could not pay.
 
 ## LNS names instead of addresses
 
 Every account argument accepts either a 64-hex address or a logos-names v5 name: `creator`,
 `beneficiary`, `token`, cancel/milestone authorities, `--as-account`, `--to-private`, transfer
 targets, `list` filters and batch rows (`"beneficiary": "alice"`). Names are resolved at the
-moment of the action through the `lns` module of `logos-sdk` (vendored in `vendor/logos-sdk/`); the resolved address is what goes on
-chain. No on-chain change is needed.
+moment of the action through the `lns` module of `logos-sdk` (vendored in `vendor/logos-sdk/`,
+used through `vesting_sdk::names` by the CLI and the Basecamp module); the resolved address is
+what goes on chain. Addresses may be 64 hex characters or base58 (`Public/…` too). No on-chain
+change is needed.
 
 ```sh
 $V --lns <lns-program> --lns-rpc https://lez.nameswallet.app/ create \
@@ -213,7 +223,8 @@ P="--program <program hex> --lez-map ids.json"     # add --token-program <hex> f
 $V $P create --creator <hex> --beneficiary <hex> --token 00..00 --total 1000000 --kind linear --start <ms> --end <ms>
 $V $P claim 0 --yes                                # public; --to-private <private account hex> for private
 $V $P cancel 0 --as-account <creator hex>
-$V $P --dry-run claim 0 --yes                      # the wallet's report: cycles, bytes, fee
+$V $P summary 0 --to-private <private account hex> # claimable, the simulated fee, the fee check
+$V $P --dry-run claim 0 --yes                      # the wallet's full report: cycles, bytes, fee
 ```
 
 `scripts/e2e.sh` exercises every operation this way; `scripts/pub-smoke.sh` is the public-chain
@@ -234,9 +245,11 @@ Details in [`docs/EVENTS.md`](docs/EVENTS.md).
 
 ## Mini-app and viewer
 
-- `miniapp/`: recipient and creator views, the pre-claim summary with fee and the privacy
-  disclosure, batch creation, cancel/signal/transfer actions. See `miniapp/README.md` and
-  `miniapp/module/README.md` (build, settings for the chain, what is still open).
+- `miniapp/`: two Basecamp packages, the `vesting` core module and the `vesting_ui` app:
+  recipient and creator views on the wallet's own accounts, the pre-claim summary with the
+  simulated fee, the fee check and the privacy disclosure, batch creation, cancel/signal/transfer,
+  import, LNS names, settings (a LEZ wallet, the built-in network or a network file). Build and
+  module calls: `miniapp/README.md`; install and click-through: `docs/BASECAMP-TEST.md`.
 - `web/viewer/`: `cd web/viewer && python3 -m http.server 8099`, then open the page and give a
   schedule account (or a creator and nonce, or an LNS name). Defaults to the public deployment.
 
@@ -249,3 +262,5 @@ Details in [`docs/EVENTS.md`](docs/EVENTS.md).
   are read through Bedrock-backed indexers (`docs/EVENTS.md`).
 - Schedule ids in the CLI and SDK are local; a beneficiary on another machine imports the
   schedule account (`vesting import <account>`).
+- In Basecamp the module answers one call at a time, and a private claim is proven on the
+  machine (minutes with a real proof): other calls wait for it.
