@@ -973,7 +973,9 @@ Item {
             hoverEnabled: true
             enabled: action.enabledNow
             cursorShape: Qt.PointingHandCursor
-            onClicked: action.pressed()
+            // Take focus first: a Field commits its text on editingFinished, which a click
+            // elsewhere does not send, so without this a value typed just before the click is lost.
+            onClicked: { action.forceActiveFocus(); action.pressed() }
         }
     }
 
