@@ -15,9 +15,22 @@
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
+    let
+      # risc0 (the in-process prover of private claims) compiles its Apple GPU kernels with the
+      # system's Metal compiler (`xcrun metal`, from Xcode), which a nix build doesn't see: this
+      # xcrun hands the call to macOS's own. Apple-silicon macOS builds only.
+      pkgs = logos-module-builder.inputs.nixpkgs.legacyPackages.aarch64-darwin;
+      systemXcrun = pkgs.writeShellScriptBin "xcrun" ''
+        unset DEVELOPER_DIR SDKROOT
+        exec /usr/bin/xcrun "$@"
+      '';
+    in
     logos-module-builder.lib.mkLogosModule {
       src = ./.;
       configFile = ./metadata.json;
       flakeInputs = inputs;
+      rustExtraNativeBuildInputs = [ systemXcrun ];
+      # risc0's kernel build keeps a cache under $HOME, which a nix build has read-only.
+      rustEnv = { HOME = "/private/tmp/vest-module-build-home"; };
     };
 }
