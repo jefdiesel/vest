@@ -1,0 +1,12 @@
+[package]
+name = "vesting-methods"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Guest builds: the vesting program and, for tests, the 0.4 token program"
+
+[build-dependencies]
+risc0-build = "=3.0.5"
+
+[package.metadata.risc0]
+methods = ["vesting_guest", "token_guest"]

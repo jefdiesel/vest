@@ -1,0 +1,19 @@
+PASS deploy-vesting  :: program 1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d image 2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6 
+PASS create-linear tx 1e54efd29e3cf817ad3c96ca01808150612b86893055f0d847d2a76589988d12 block 38738 clock 1795194352762 :: created schedule 0 claimable now: 54101 
+PASS claim-public tx 49b24754221e026500afa6509ae1608a48326e7cd2e27000cfd0b4add692dee0 block 38739 clock 1795194367764 :: claimed 81385 
+PASS create-cliff tx 5fff794522a0b3266cbbb3f495389c5e2635416285c9d22f95a30d485eb1d3aa block 38740 clock 1795194382764 :: created schedule 1 claimable now: 0 
+PASS claim-before-cliff  :: error: Nothing is claimable yet: the cliff is at 1795194435000 ms. The whole accrued amount unlocks then. (code 9) 
+PASS claim-after-cliff tx e409ad49b905ae7586c8ee4902be6a91cdc57af37dbe2948978d7ef73d4a4b54 block 38745 clock 1795194457766 :: claimed 38245 
+PASS cancel tx f5f4d3746ff7cb5c3241b061bf03f6988e9b86f72e8c35aa665463654a37574c block 38746 clock 1795194472765 :: refunded 254378 to the creator 
+PASS claim-after-cancel tx 26ce7d6e30d787c2b2e241f87081eac262b95cd2c2eba918cdcb73c4f37502d8 block 38747 clock 1795194487767 :: claimed 7377 
+PASS show-cancelled  :: claimable now: 0 cancelled at 2026-11-20 17:07 UTC; vested at cancellation 45622, refund 254378 
+PASS create-milestone tx 1c6eddce1ca1877fe92a2337df6952207836d44bc2102d2d1bebd5881aa237b0 block 38748 clock 1795194502766 :: created schedule 2 claimable now: 0 
+PASS claim-before-signal  :: error: Nothing is claimable yet: waiting for the milestone authority to signal the next tranche. (code 9) 
+PASS signal-0 tx add3febeabac85a24da2d7057c78067e88be12df6f2f2fce31c4b1f00cf84f7d block 38749 clock 1795194517767 :: signalled milestone 0: unlocked 100000 
+PASS signal-0-again  :: error: Milestone 0 was already signalled; it cannot unlock twice. (code 18) 
+PASS claim-tranche-0 tx 96233bc3c1f6d22ef2a7664119d0a88628246aa26934f2e6295693b19a968a84 block 38750 clock 1795194532768 :: claimed 100000 
+PASS make-irrevocable tx 2b3c620d3ead92091d4431f58b860c224f3c8c3d7c5b470f871a85ae5362acee block 38751 clock 1795194547768 :: schedule 2 is now irrevocable 
+PASS cancel-irrevocable  :: error: This schedule is irrevocable and cannot be cancelled. (code 14) 
+PASS transfer tx f42caa5d53b647533f95340011e7da4e63fe7d1485cf9fad99f22386fb1144ce block 38752 clock 1795194562768 :: beneficiary of schedule 2 is now 97d2ac9ddd31b0af8d4f96f085bb12770c5a063222b2e59ed8715cd86ab4aeab 
+PASS signal-1 tx 33aea27260b816854461a934713a2aaad1c8097d93c99a14452b89bd0d560ed4 block 38753 clock 1795194577769 :: signalled milestone 1: unlocked 100000 
+PASS claim-new-beneficiary tx 9e06e2c8bd594b28f818db64059b4b44555073468d24651fc70febe4b1f21dd8 block 38754 clock 1795194592769 :: claimed 100000 

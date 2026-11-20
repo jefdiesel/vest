@@ -1,0 +1,20 @@
+== batch limit (native, then token): largest N whose create simulates
+batch-native-64-gas10M cycles=4357551 wire_bytes=19539 declared_gas=5446939 fee_at_head=35016720 action:           applies
+batch-native-96-gas10M cycles=6525438 wire_bytes=29043 declared_gas=8156798 fee_at_head=52435848 action:           applies
+batch-native-128-gas10M cycles=8709135 wire_bytes=38547 declared_gas=10000000 fee_at_head=69981456 action:           applies
+batch-native-144-gas10M cycles=9805799 wire_bytes=43299 declared_gas=10000000 fee_at_head=78792784 action:           applies
+batch-native-152-gas10M cycles=10000000 wire_bytes=45675 declared_gas=10000000 fee_at_head=80365400 action REVERTS:   Execution exceeded its cycle budget of 20885 cycles (fee is still charged)
+batch-native-160-gas10M cycles=10000000 wire_bytes=48051 declared_gas=10000000 fee_at_head=80384408 action REVERTS:   Execution exceeded its cycle budget of 2597 cycles (fee is still charged)
+batch-native-192-gas10M cycles=10000000 wire_bytes=57555 declared_gas=10000000 fee_at_head=80460440 action REVERTS:   Execution exceeded its cycle budget of 4645 cycles (fee is still charged)
+batch-token-64-gas10M cycles=8526962 wire_bytes=23699 declared_gas=10000000 fee_at_head=68405288 action:           applies
+batch-token-96-gas10M cycles=10000000 wire_bytes=35251 declared_gas=10000000 fee_at_head=80282008 action REVERTS:   Execution exceeded its cycle budget of 21467 cycles (fee is still charged)
+batch-token-128-gas10M cycles=10000000 wire_bytes=46803 declared_gas=10000000 fee_at_head=80374424 action REVERTS:   Execution exceeded its cycle budget of 15358 cycles (fee is still charged)
+batch-token-144-gas10M cycles=10000000 wire_bytes=52579 declared_gas=10000000 fee_at_head=80420632 action REVERTS:   Execution exceeded its cycle budget of 24476 cycles (fee is still charged)
+batch-token-152-gas10M cycles=10000000 wire_bytes=55467 declared_gas=10000000 fee_at_head=80443736 action REVERTS:   Execution exceeded its cycle budget of 1346 cycles (fee is still charged)
+batch-token-160-gas10M cycles=10000000 wire_bytes=58355 declared_gas=10000000 fee_at_head=80466840 action REVERTS:   Execution exceeded its cycle budget of 5831 cycles (fee is still charged)
+batch-token-192-gas10M cycles=10000000 wire_bytes=69907 declared_gas=10000000 fee_at_head=80559256 action REVERTS:   Execution exceeded its cycle budget of 17795 cycles (fee is still charged)
+batch-native-146-gas10M cycles=9940791 wire_bytes=43893 declared_gas=10000000 fee_at_head=79877472 action:           applies
+batch-native-148-gas10M cycles=10000000 wire_bytes=44487 declared_gas=10000000 fee_at_head=80355896 action REVERTS:   Execution exceeded its cycle budget of 6482 cycles (fee is still charged)
+batch-token-72-gas10M cycles=9586939 wire_bytes=26587 declared_gas=10000000 fee_at_head=76908208 action:           applies
+batch-token-74-gas10M cycles=9859240 wire_bytes=27309 declared_gas=10000000 fee_at_head=79092392 action:           applies
+batch-token-76-gas10M cycles=10000000 wire_bytes=28031 declared_gas=10000000 fee_at_head=80224248 action REVERTS:   Execution exceeded its cycle budget of 1346 cycles (fee is still charged)

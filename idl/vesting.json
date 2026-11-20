@@ -1,0 +1,688 @@
+{
+  "version": "2",
+  "name": "vesting",
+  "docs": "Vest: RFP-017 token vesting on LEZ v0.4.0-rc3. Messages are root calls to the caller's own actor (X, V); state lives at the schedule actor (S, V), S = for_public_pda(V, SHA256('/RFP017/vesting/schedule/v1' || creator || nonce)).",
+  "messages": [
+    {
+      "name": "Create",
+      "tag": 0,
+      "docs": "Creator: create and fund each schedule (native transfer, or token holding + transfer, plus an optional fee float). Sent to the caller's own actor (X, V); reads the clock.",
+      "fields": [
+        {
+          "name": "schedules",
+          "type": {
+            "vec": {
+              "defined": "NewSchedule"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Claim",
+      "tag": 1,
+      "docs": "Beneficiary: pay what vested by the clock (rounded down to `granularity` ms, at least 1) to `to`.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        },
+        {
+          "name": "to",
+          "type": "account_id"
+        },
+        {
+          "name": "to_private",
+          "type": "bool"
+        },
+        {
+          "name": "granularity",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "ClaimAsOf",
+      "tag": 2,
+      "docs": "Beneficiary: pay what vested by `as_of`; the transaction is valid only in blocks with timestamp >= as_of. No clock read: a private claim's proof never expires.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        },
+        {
+          "name": "to",
+          "type": "account_id"
+        },
+        {
+          "name": "to_private",
+          "type": "bool"
+        },
+        {
+          "name": "as_of",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Cancel",
+      "tag": 3,
+      "docs": "Cancel authority: refund the unvested part to the creator; what vested stays claimable. Reads the clock at 1 ms.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        }
+      ]
+    },
+    {
+      "name": "MakeIrrevocable",
+      "tag": 4,
+      "docs": "Cancel authority or creator: make a cancelable schedule irrevocable (one-way). Reads the clock.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        }
+      ]
+    },
+    {
+      "name": "SignalMilestone",
+      "tag": 5,
+      "docs": "Milestone authority: unlock tranche `index`; a repeat is refused (code 18). Reads the clock.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        },
+        {
+          "name": "index",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "TransferBeneficiary",
+      "tag": 6,
+      "docs": "Beneficiary of a transferable schedule: hand the position to `new_beneficiary`. Reads the clock.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        },
+        {
+          "name": "new_beneficiary",
+          "type": "account_id"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "defined": "ScheduleState"
+  },
+  "events": [
+    {
+      "name": "Created",
+      "selector": "ff55b26d55f2793a",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    },
+    {
+      "name": "Claimed",
+      "selector": "aa25b4641ce8cb29",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    },
+    {
+      "name": "Cancelled",
+      "selector": "fee82a2f47263d1f",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    },
+    {
+      "name": "MilestoneSignalled",
+      "selector": "0882439381b3eec9",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    },
+    {
+      "name": "BeneficiaryTransferred",
+      "selector": "3edd69d43332bdb2",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    },
+    {
+      "name": "MadeIrrevocable",
+      "selector": "b1ee48fe41415029",
+      "type": {
+        "defined": "VestingEvent"
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Asset",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Native",
+          "fields": []
+        },
+        {
+          "name": "Token",
+          "fields": [
+            {
+              "name": "program",
+              "type": "account_id"
+            },
+            {
+              "name": "definition",
+              "type": "account_id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sponsor",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "deposit",
+          "type": "u128"
+        },
+        {
+          "name": "per_claim",
+          "type": "u128"
+        }
+      ]
+    },
+    {
+      "name": "ScheduleKind",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "CliffLinear",
+          "fields": [
+            {
+              "name": "start",
+              "type": "u64"
+            },
+            {
+              "name": "cliff",
+              "type": "u64"
+            },
+            {
+              "name": "end",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "Linear",
+          "fields": [
+            {
+              "name": "start",
+              "type": "u64"
+            },
+            {
+              "name": "end",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "Milestone",
+          "fields": [
+            {
+              "name": "tranches",
+              "type": {
+                "vec": "u128"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "NewSchedule",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "type": "account_id"
+        },
+        {
+          "name": "asset",
+          "type": {
+            "defined": "Asset"
+          }
+        },
+        {
+          "name": "total",
+          "type": "u128"
+        },
+        {
+          "name": "kind",
+          "type": {
+            "defined": "ScheduleKind"
+          }
+        },
+        {
+          "name": "cancelable",
+          "type": {
+            "option": "bool"
+          }
+        },
+        {
+          "name": "transferable",
+          "type": {
+            "option": "bool"
+          }
+        },
+        {
+          "name": "cancel_authority",
+          "type": {
+            "option": "account_id"
+          }
+        },
+        {
+          "name": "milestone_authority",
+          "type": {
+            "option": "account_id"
+          }
+        },
+        {
+          "name": "sponsor",
+          "type": {
+            "option": {
+              "defined": "Sponsor"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Op",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Claim",
+          "fields": [
+            {
+              "name": "to",
+              "type": "account_id"
+            },
+            {
+              "name": "to_private",
+              "type": "bool"
+            }
+          ]
+        },
+        {
+          "name": "Cancel",
+          "fields": []
+        },
+        {
+          "name": "MakeIrrevocable",
+          "fields": []
+        },
+        {
+          "name": "SignalMilestone",
+          "fields": [
+            {
+              "name": "index",
+              "type": "u32"
+            }
+          ]
+        },
+        {
+          "name": "TransferBeneficiary",
+          "fields": [
+            {
+              "name": "new_beneficiary",
+              "type": "account_id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pending",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Create",
+          "fields": [
+            {
+              "name": "creator",
+              "type": "account_id"
+            },
+            {
+              "name": "params",
+              "type": {
+                "defined": "NewSchedule"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Op",
+          "fields": [
+            {
+              "name": "caller",
+              "type": "account_id"
+            },
+            {
+              "name": "op",
+              "type": {
+                "defined": "Op"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CancelRecord",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "at",
+          "type": "u64"
+        },
+        {
+          "name": "vested_at_cancel",
+          "type": "u128"
+        }
+      ]
+    },
+    {
+      "name": "Schedule",
+      "kind": "struct",
+      "docs": "vesting-core's Schedule, stored verbatim.",
+      "fields": [
+        {
+          "name": "creator",
+          "type": "account_id"
+        },
+        {
+          "name": "beneficiary",
+          "type": "account_id"
+        },
+        {
+          "name": "token",
+          "type": "account_id"
+        },
+        {
+          "name": "total",
+          "type": "u128"
+        },
+        {
+          "name": "claimed",
+          "type": "u128"
+        },
+        {
+          "name": "kind",
+          "type": {
+            "defined": "ScheduleKind"
+          }
+        },
+        {
+          "name": "cancelable",
+          "type": "bool"
+        },
+        {
+          "name": "transferable",
+          "type": "bool"
+        },
+        {
+          "name": "cancel_authority",
+          "type": "account_id"
+        },
+        {
+          "name": "milestone_authority",
+          "type": "account_id"
+        },
+        {
+          "name": "signalled",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "name": "cancelled",
+          "type": {
+            "option": {
+              "defined": "CancelRecord"
+            }
+          }
+        },
+        {
+          "name": "last_time",
+          "type": "u64"
+        },
+        {
+          "name": "version",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "ScheduleState",
+      "kind": "struct",
+      "docs": "The schedule actor (S, V): the core schedule plus the chain's bookkeeping.",
+      "fields": [
+        {
+          "name": "version",
+          "type": "u8"
+        },
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "asset",
+          "type": {
+            "defined": "Asset"
+          }
+        },
+        {
+          "name": "schedule",
+          "type": {
+            "option": {
+              "defined": "Schedule"
+            }
+          }
+        },
+        {
+          "name": "float",
+          "type": "u128"
+        },
+        {
+          "name": "per_claim",
+          "type": "u128"
+        },
+        {
+          "name": "pending",
+          "type": {
+            "option": {
+              "defined": "Pending"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Event",
+      "kind": "enum",
+      "docs": "vesting-core's Event.",
+      "variants": [
+        {
+          "name": "Created",
+          "fields": [
+            {
+              "name": "creator",
+              "type": "account_id"
+            },
+            {
+              "name": "beneficiary",
+              "type": "account_id"
+            },
+            {
+              "name": "token",
+              "type": "account_id"
+            },
+            {
+              "name": "total",
+              "type": "u128"
+            },
+            {
+              "name": "kind",
+              "type": {
+                "defined": "ScheduleKind"
+              }
+            },
+            {
+              "name": "cancelable",
+              "type": "bool"
+            },
+            {
+              "name": "transferable",
+              "type": "bool"
+            },
+            {
+              "name": "cancel_authority",
+              "type": "account_id"
+            },
+            {
+              "name": "milestone_authority",
+              "type": "account_id"
+            },
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "Claimed",
+          "fields": [
+            {
+              "name": "amount",
+              "type": "u128"
+            },
+            {
+              "name": "to_private",
+              "type": "bool"
+            },
+            {
+              "name": "claimed_total",
+              "type": "u128"
+            },
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "Cancelled",
+          "fields": [
+            {
+              "name": "vested_at_cancel",
+              "type": "u128"
+            },
+            {
+              "name": "refund",
+              "type": "u128"
+            },
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "MilestoneSignalled",
+          "fields": [
+            {
+              "name": "index",
+              "type": "u16"
+            },
+            {
+              "name": "amount",
+              "type": "u128"
+            },
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "BeneficiaryTransferred",
+          "fields": [
+            {
+              "name": "old",
+              "type": "account_id"
+            },
+            {
+              "name": "new",
+              "type": "account_id"
+            },
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        },
+        {
+          "name": "MadeIrrevocable",
+          "fields": [
+            {
+              "name": "at",
+              "type": "u64"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VestingEvent",
+      "kind": "struct",
+      "docs": "An event's data: the schedule it happened to and the core event.",
+      "fields": [
+        {
+          "name": "schedule",
+          "type": "account_id"
+        },
+        {
+          "name": "event",
+          "type": {
+            "defined": "Event"
+          }
+        }
+      ]
+    }
+  ]
+}

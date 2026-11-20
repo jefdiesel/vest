@@ -1,0 +1,22 @@
+[package]
+name = "vesting-e2e"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "End-to-end test: an in-process LEZ rc3 standalone sequencer, scripts/e2e.sh through the CLI, events read back from the sequencer's own store"
+
+[dependencies]
+
+[dev-dependencies]
+vesting-program = { path = "../program" }
+vesting-core = { path = "../core" }
+borsh = { version = "1", features = ["derive"] }
+hex = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+lee_core = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["host"] }
+sequencer_service = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["standalone", "prove"] }
+sequencer_storage_actor = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3" }
+common = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3" }
+kameo = "0.22.2"

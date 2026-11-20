@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RFP-017 vesting viewer</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  label { display: block; margin: .5rem 0 .2rem; }
+  input { width: 100%; box-sizing: border-box; padding: .45rem; font: inherit; }
+  button { margin-top: 1rem; padding: .5rem 1rem; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-top: 1rem; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { width: 11rem; }
+  .note { color: #555; font-size: .9rem; }
+  #status { margin-top: 1rem; }
+  .err { color: #a00; }
+</style>
+<h1>Vesting schedules (read-only)</h1>
+<p class="note">Static viewer on the LEZ 0.4 bridge test network. It only reads chain state; it never signs or sends.</p>
+
+<label>RPC URL <input id="rpc" value="https://lez.nameswallet.app/"></label>
+<label>Program id (change if the program is redeployed) <input id="program" value="2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2"></label>
+<label>Schedule account, creator/beneficiary address, or LNS name <input id="input" placeholder="account id or name, e.g. jef05"></label>
+<label>Nonce (optional: derive a schedule from a creator + nonce) <input id="nonce" placeholder="text or up to 32 bytes"></label>
+<button id="go">Read</button>
+<div id="status"></div>
+<div id="result"></div>
+
+<script type="module">
+  import { run } from './viewer.mjs';
+  const button = document.querySelector('#go');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Reading…';
+    document.querySelector('#status').textContent = '';
+    document.querySelector('#result').replaceChildren();
+    try {
+      await run({
+        rpcUrl: document.querySelector('#rpc').value.trim(),
+        program: document.querySelector('#program').value.trim(),
+        input: document.querySelector('#input').value.trim(),
+        nonce: document.querySelector('#nonce').value.trim(),
+        status: document.querySelector('#status'),
+        result: document.querySelector('#result'),
+      });
+    } catch (error) {
+      document.querySelector('#status').textContent = String(error?.message ?? error);
+      document.querySelector('#status').className = 'err';
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Read';
+    }
+  });
+</script>

@@ -1,0 +1,12 @@
+[package]
+name = "logos-accounts"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+lee_core = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["host"] }
+sha2 = "0.10"
+hex = "0.4"
+
+# Vendored from logos-sdk 52e111c (crates/accounts) for the public Vest repository.

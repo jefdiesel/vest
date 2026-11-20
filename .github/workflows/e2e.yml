@@ -1,0 +1,82 @@
+# End to end against a real LEZ v0.4.0-rc3 standalone sequencer (RFP-017 Supportability 2).
+# The sequencer runs inside the test process (vesting-e2e), so the program's events can be read back
+# from its own event store; scripts/e2e.sh drives every operation through the vesting CLI.
+# Proofs are dev-mode receipts (RISC0_DEV_MODE=1). The payer is LEZ's published local-test genesis
+# account (lez/testnet_initial_state), funded by networks/local.json on a fresh chain: no secret.
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  LEZ_TAG: v0.4.0-rc3
+  LEZ_COMMIT: "bafd07be"
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit tests (core, SDK without the chain, CLI with the JSON backend, program events)
+        run: cargo test -p vesting-core -p vesting-sdk -p vesting-cli -p vesting-program
+
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries (PC/SC for the wallet's Keycard support)
+        run: sudo apt-get update -q && sudo apt-get install -y -q libpcsclite-dev pkg-config
+      - name: Install rzup (risc0 toolchain, for the guest builds)
+        run: |
+          curl -L https://risczero.com/install | bash
+          echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.risc0/bin:$PATH"
+          rzup install cargo-risczero 3.0.5
+          rzup install rust
+
+      - name: Restore the standalone sequencer (per LEZ commit)
+        id: seqcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/lez-seq
+          key: lez-seq-standalone-${{ env.LEZ_COMMIT }}
+      - name: Build sequencer_service --features standalone at ${{ env.LEZ_TAG }}
+        if: steps.seqcache.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet --depth 1 --branch "$LEZ_TAG" https://github.com/logos-blockchain/logos-execution-zone.git "$RUNNER_TEMP/lez"
+          test "$(git -C "$RUNNER_TEMP/lez" rev-parse --short=8 HEAD)" = "$LEZ_COMMIT"
+          (cd "$RUNNER_TEMP/lez" && cargo build --release --features standalone -p sequencer_service)
+          mkdir -p ~/lez-seq
+          cp "$RUNNER_TEMP/lez/target/release/sequencer_service" ~/lez-seq/
+          cp "$RUNNER_TEMP/lez/lez/sequencer/service/networks/local.json" ~/lez-seq/
+          rm -rf "$RUNNER_TEMP/lez"
+      - name: Save the standalone sequencer
+        if: steps.seqcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/lez-seq
+          key: lez-seq-standalone-${{ env.LEZ_COMMIT }}
+
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the CLI (LEZ backend) and the guests
+        run: cargo build --release -p vesting-cli -p vesting-methods --features vesting-cli/lez
+      - name: End to end (in-process sequencer, dev-mode proofs)
+        env:
+          SEQ_BIN: /home/runner/lez-seq/sequencer_service
+          LOCAL_JSON: /home/runner/lez-seq/local.json
+          VESTING_BIN: ${{ github.workspace }}/target/release/vesting
+          VESTING_ELF: ${{ github.workspace }}/target/riscv-guest/vesting-methods/vesting_guest/riscv32im-risc0-zkvm-elf/release/vesting_guest.bin
+          TOKEN_ELF: ${{ github.workspace }}/target/riscv-guest/vesting-methods/token_guest/riscv32im-risc0-zkvm-elf/release/token_guest.bin
+          E2E_DIR: ${{ runner.temp }}/e2e
+          RISC0_DEV_MODE: "1"
+        run: cargo test --release -p vesting-e2e -- --ignored --nocapture
+      - name: Logs
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP/e2e/run/RESULTS.txt" || true
+          tail -200 "$RUNNER_TEMP/e2e/run/log.txt" || true

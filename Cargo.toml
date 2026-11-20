@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["core", "sdk", "cli", "program", "methods", "methods/vesting_guest", "methods/token_guest", "e2e", "idl-check"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Same keccak patch LEZ rc3 applies (as the spike and the RFP-022 bridge workspaces do).
+[patch.crates-io]
+keccak = { git = "https://github.com/logos-blockchain/sponges", rev = "3a56e99771beedf04946eab21a4a62adc2951377" }
+
+# Guest ELFs without symbols: a deployment pays for every byte (the symbol tables were 37% of the
+# vesting guest). Per-package, so the host crates keep their profile.
+[profile.release.package.vesting_guest]
+strip = "symbols"
+[profile.release.package.token_guest]
+strip = "symbols"

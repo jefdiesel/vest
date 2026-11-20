@@ -1,0 +1,46 @@
+[package]
+name = "vesting-sdk"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[features]
+# The real LEZ rc3 backend. Off by default: the wire module and its offline tests build without
+# the chain's heavy proving dependencies.
+lez = [
+    "dep:anyhow", "dep:lee_core", "dep:lee", "dep:common", "dep:wallet",
+    "dep:vesting-program", "dep:token_core", "dep:clap", "dep:sequencer_service_rpc", "dep:tokio", "dep:url", "dep:serde", "dep:serde_json",
+    "dep:risc0-zkvm", "dep:risc0-binfmt", "dep:risc0-circuit-recursion", "dep:risc0-circuit-rv32im",
+    "dep:risc0-circuit-keccak", "dep:risc0-groth16", "dep:risc0-zkp", "dep:risc0-core",
+]
+
+[dependencies]
+vesting-core = { path = "../core" }
+vesting-program = { path = "../program", optional = true }
+token_core = { git = "https://github.com/logos-blockchain/lez-programs.git", rev = "cad71fc67d75ec9f6a07fc908f687678de7f7ed6", optional = true }
+clap = { version = "4", optional = true }
+hex = "0.4"
+borsh = { version = "1", features = ["derive"] }
+
+# LEZ rc3, pinned to the spike's upstream revision bafd07be (tag v0.4.0-rc3).
+anyhow = { version = "1", optional = true }
+lee_core = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["host"], optional = true }
+# `prove`: private claims are proven in-process (RISC0_PROVER=local), never through an external r0vm.
+lee = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["prove"], optional = true }
+common = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", optional = true }
+wallet = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", optional = true }
+sequencer_service_rpc = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3", features = ["client"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+url = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+# The exact risc0 versions of LEZ rc3 (as the spike and the RFP-022 bridge CLI pin them): other
+# versions make receipts the rc3 sequencer refuses.
+risc0-zkvm = { version = "=3.0.5", default-features = false, features = ["std"], optional = true }
+risc0-binfmt = { version = "=3.0.4", optional = true }
+risc0-circuit-recursion = { version = "=4.0.4", default-features = false, optional = true }
+risc0-circuit-rv32im = { version = "=4.0.4", default-features = false, optional = true }
+risc0-circuit-keccak = { version = "=4.0.5", default-features = false, optional = true }
+risc0-groth16 = { version = "=3.0.4", default-features = false, optional = true }
+risc0-zkp = { version = "=3.0.4", default-features = false, optional = true }
+risc0-core = { version = "=3.0.1", default-features = false, optional = true }

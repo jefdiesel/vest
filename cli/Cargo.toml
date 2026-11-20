@@ -1,0 +1,30 @@
+[package]
+name = "vesting-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vesting"
+path = "src/main.rs"
+
+[features]
+lez = ["vesting-sdk/lez"]
+
+[dependencies]
+vesting-core = { path = "../core" }
+vesting-sdk = { path = "../sdk" }
+borsh = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+hex = "0.4"
+bs58 = "0.5"
+aes-gcm = "0.10"
+logos-lns = { path = "../vendor/logos-sdk/lns" }
+logos-rpc = { path = "../vendor/logos-sdk/rpc" }
+logos-accounts = { path = "../vendor/logos-sdk/accounts" }
+
+[dev-dependencies]
+tempfile = "3"
