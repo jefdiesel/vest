@@ -335,7 +335,7 @@ fn transfer_is_frozen_at_creation_and_authorised() {
     assert_eq!(claim(&moved, B, 5, false).unwrap_err().code(), 10);
     assert_eq!(claim(&moved, C, 5, false).unwrap().1, 50);
     // Transferability itself cannot be changed.
-    assert_eq!(transferable.transferable, true);
+    assert!(transferable.transferable);
 }
 
 #[test]

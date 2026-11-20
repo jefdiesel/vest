@@ -253,7 +253,7 @@ pub fn mock_record_answer(
         texts: Vec::new(),
     };
     let mut plain = borsh::to_vec(&wire).expect("borsh");
-    while plain.len() % 256 != 0 {
+    while !plain.len().is_multiple_of(256) {
         plain.push(0);
     }
     let nonce = [0u8; NONCE_LEN];
@@ -292,7 +292,7 @@ mod tests {
             texts: Vec::new(),
         };
         let mut plain = borsh::to_vec(&wire).unwrap();
-        while plain.len() % 256 != 0 {
+        while !plain.len().is_multiple_of(256) {
             plain.push(0);
         }
         let nonce = [0u8; NONCE_LEN];
