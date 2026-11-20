@@ -1,19 +1,20 @@
 {
   "name": "vesting_ui",
   "display_name": "Vesting",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "ui_qml",
-  "interface": "universal",
   "category": "finance",
-  "description": "View and manage LEZ vesting schedules, with a choice of public or private claim destinations",
-  "main": "vesting_ui_plugin",
-  "icon": "src/icons/icon.png",
+  "description": "View and manage LEZ vesting schedules: claim to a public or private account, create, cancel, signal, transfer",
   "view": "qml/Main.qml",
-  "dependencies": [],
+  "icon": "src/icons/icon.png",
+  "dependencies": [
+    {
+      "name": "vesting",
+      "version": ">=0.2.0"
+    }
+  ],
   "provides": [],
   "uses": [],
-  "codegen": { "rep": "src/vesting_ui.rep" },
-
   "nix": {
     "packages": {
       "build": [],

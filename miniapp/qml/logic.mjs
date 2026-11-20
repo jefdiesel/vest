@@ -1,24 +1,26 @@
 // The Vesting mini-app's own logic, kept apart from the QML so the Node test
-// (../../logic.test.mjs) runs the same code the app does. The QML engine imports this
+// (../logic.test.mjs) runs the same code the app does. The QML engine imports this
 // as an ECMAScript module: `import "logic.mjs" as Logic`.
 //
-// The backend is a mock that returns raw data only: sample schedules, destination accounts
-// and a fixed fee. Every piece of display logic — formatting, the vesting maths for display,
-// validation, next-unlock text, the pre-claim confirmation, fee and privacy checks, and the
-// plain result lines — lives here so it can be tested without the QML engine.
+// The data comes from the `vesting` core module (../module): schedules, wallet accounts, the
+// pre-claim summary with the simulated fee. Everything the view does with it — adapting the
+// module's rows, formatting, the vesting maths for display, validation, next-unlock text, the
+// fee check, the privacy disclosure and the plain result lines — lives here, tested in Node.
 
 /// The three schedule kinds the creator can choose.
 export const KINDS = ["cliff-linear", "linear", "milestone"]
 
-/// Mock estimated claim fee, in whole LEZ. The real module will supply this.
-export const FEE = "2"
-/// Mock token of the sample schedules.
+/// Native LEZ, the token of a schedule whose token is the zero account.
 export const TOKEN = "LEZ"
+const ZERO = "0000000000000000000000000000000000000000000000000000000000000000"
 
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+const HEX = /^[0-9a-fA-F]{64}$/
+// An LNS name as people type it (the module normalises and resolves it through the registry).
+const NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/i
 
 function num(v) {
     var n = Number(v)
@@ -257,47 +259,114 @@ export function nextUnlock(s, now) {
     return { at: 0, text: "Fully vested — nothing left to unlock." }
 }
 
+// ── Module replies ───────────────────────────────────────────────────────────────────
+
+/// A reply of `logos.callModule(Async)("vesting", ...)` as `{ok, error, ...}`. The host may hand
+/// the module's JSON text encoded once or twice; no reply, or the host's own words for a module
+/// that isn't there, become a plain error (`missing: true` for the latter).
+export function reply(raw) {
+    var parsed = raw
+    for (var depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
+        try { parsed = JSON.parse(parsed) } catch (error) { break }
+    }
+    if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") return parsed
+    var said = typeof raw === "string" ? raw : JSON.stringify(raw)
+    if (/module not connected|module not reachable|no such (module|method)|unknown (module|method)|method not found|module not found|not loaded|is not installed/i.test(said || ""))
+        return { ok: false, missing: true, error: "The Vesting module isn't installed or isn't running (" + said + "). Install it and reopen the app." }
+    return { ok: false, error: "No answer from the Vesting module (it may still be busy, e.g. proving a private claim); try again." }
+}
+
+// ── Module data ──────────────────────────────────────────────────────────────────────
+
+/// A schedule row of the module's `list` as the view uses it: the kind as a string, its times
+/// and tranches flat, and the module's ready display strings kept.
+export function fromModule(row) {
+    row = row || {}
+    var k = row.kind || {}
+    var out = {}
+    var keys = Object.keys(row)
+    for (var i = 0; i < keys.length; i++) out[keys[i]] = row[keys[i]]
+    out.kind = k.type || ""
+    out.start = k.start || 0
+    out.cliff = k.cliff || 0
+    out.end = k.end || 0
+    out.tranches = k.tranches || []
+    out.signalled = row.signalled || []
+    out.mine = row.mine || {}
+    out.tokenLabel = isNative(row.token) ? TOKEN : short(row.token)
+    return out
+}
+
+/// Whether a token id is native LEZ (the zero account, or empty).
+export function isNative(token) {
+    var t = String(token == null ? "" : token).trim()
+    return t === "" || t === ZERO || t.toUpperCase() === TOKEN
+}
+
+/// The module's `create` row for one schedule of the view's form `p` by `creator`.
+export function toCreateRow(p, creator) {
+    var kind = { type: p.kind }
+    if (p.kind === "milestone") kind.tranches = (p.tranches || []).map(String)
+    else {
+        kind.start = num(p.start)
+        kind.end = num(p.end)
+        if (p.kind === "cliff-linear") kind.cliff = num(p.cliff)
+    }
+    var total = p.kind === "milestone" ? sumAmounts(kind.tranches) : String(p.amount)
+    return {
+        creator: creator, beneficiary: String(p.beneficiary).trim(),
+        token: isNative(p.token) ? TOKEN : String(p.token).trim(),
+        total: total, kind: kind,
+        cancelable: !!p.cancelable, transferable: !!p.transferable,
+        cancel_authority: p.cancelAuthority ? String(p.cancelAuthority).trim() : null,
+        milestone_authority: p.milestoneAuthority ? String(p.milestoneAuthority).trim() : null
+    }
+}
+
 // ── Accounts and creation validation ────────────────────────────────────────────────
 
-/// Why `account` is not the requested account kind, or "". `wantPrivate`: true (private
-/// only), false (public only), null (either).
-export function problemAccount(account, wantPrivate) {
-    var s = String(account == null ? "" : account).trim()
+/// What kind of account text this is: "hex", "base58", "name" or "" (not an account).
+export function accountKind(text) {
+    var s = String(text == null ? "" : text).trim()
     var m = /^(Public|Private)\/(.+)$/.exec(s)
-    if (!m) return "Enter an account ID as Public/<id> or Private/<id>."
-    if (!BASE58.test(m[2])) return "That is not a valid account ID (base58, 32–44 characters)."
-    if (wantPrivate === true && m[1] !== "Private") return "Choose a private account for a private claim."
-    if (wantPrivate === false && m[1] !== "Public") return "Choose a public account for a public claim."
+    if (m) return BASE58.test(m[2]) ? "base58" : ""
+    if (HEX.test(s)) return "hex"
+    if (BASE58.test(s) && s.length >= 32) return "base58"
+    if (NAME.test(s)) return "name"
     return ""
 }
 
-/// SDK-style check that a private claim's target really is a private (shielded) account.
-export function privateTargetProblem(account) { return problemAccount(account, true) }
+/// Why `text` can't be sent to the module as an account (an address or an LNS name), or "".
+export function problemAccount(text) {
+    var s = String(text == null ? "" : text).trim()
+    if (s === "") return "Enter an account (hex or base58) or an LNS name."
+    if (accountKind(s) === "") return "That is not an account ID (64 hex or base58) or an LNS name."
+    return ""
+}
 
-// ── LNS names (mock map from the module until the SDK name module lands) ──────────────
-
-/// The name registered for `account` in a {name: account} map, or "".
+/// The name the module's name book shows for an account ({hex: name}), or "".
 export function nameOf(account, names) {
-    var map = names || {}, keys = Object.keys(map), want = String(account).trim().toLowerCase()
-    for (var i = 0; i < keys.length; i++)
-        if (String(map[keys[i]]).trim().toLowerCase() === want) return keys[i]
-    return ""
+    var map = names || {}
+    return map[String(account == null ? "" : account).trim().toLowerCase()] || ""
 }
 
-/// "alice · Baaa…aaaa" for a known name, else just the short account.
+/// "alice · 0a1b2c…7f8e" for a known name, else just the short account.
 export function labelled(account, names) {
     var name = nameOf(account, names)
     return name ? name + " · " + short(account) : short(account)
 }
 
-/// Resolve what the user typed: an LNS name from the mock map, or a literal account ID.
-/// Returns {ok, account, error}; callers use `account` for module calls and `labelled` for display.
-export function accountInput(text, names) {
+/// What the user typed, checked for shape only: {ok, account, error}. The module resolves
+/// names through the LNS registry and says what each one resolved to.
+export function accountInput(text) {
     var typed = String(text == null ? "" : text).trim()
-    var map = names || {}
-    if (map[typed.toLowerCase()]) return { ok: true, account: map[typed.toLowerCase()], error: "" }
-    if (problemAccount(typed, null) === "") return { ok: true, account: typed, error: "" }
-    return { ok: false, account: "", error: "Enter a known LNS name or an account ID (Public/<id> or Private/<id>)." }
+    var problem = problemAccount(typed)
+    return problem === "" ? { ok: true, account: typed, error: "" } : { ok: false, account: "", error: problem }
+}
+
+/// "alice resolves to 0a1b…" lines for the names a module answer resolved.
+export function resolvedLines(resolved) {
+    return (resolved || []).map(function(r) { return r.name + " resolves to " + r.base58 + "." })
 }
 
 /// "100000, 200000;300000" → ["100000", "200000", "300000"].
@@ -313,12 +382,8 @@ export function validateBatch(p) {
     p = p || {}
     var e = [], rows = p.rows || []
     if (KINDS.indexOf(p.kind) < 0) e.push("Choose a schedule kind.")
-    if (typeof p.token !== "string" || !/^[A-Za-z0-9]{2,10}$/.test(p.token.trim())) e.push("Token symbol must be 2–10 letters or digits.")
-    var start = num(p.start), end = num(p.end), cliff = num(p.cliff || 0)
-    if (!isFinite(Number(p.start)) || start <= 0) e.push("Enter a valid start date.")
-    if (!isFinite(Number(p.end)) || end <= start) e.push("End date must be after the start date.")
-    if (p.kind === "cliff-linear" && (!isFinite(Number(p.cliff)) || cliff <= start || cliff >= end))
-        e.push("Cliff date must be between the start and end dates.")
+    if (tokenProblem(p.token)) e.push(tokenProblem(p.token))
+    if (p.kind !== "milestone") e = e.concat(dateProblems(p))
     if (rows.length === 0) e.push("Add at least one recipient.")
     for (var i = 0; i < rows.length; i++) {
         var r = rows[i] || {}
@@ -340,14 +405,12 @@ export function validateCreate(p) {
     p = p || {}
     var e = []
     if (KINDS.indexOf(p.kind) < 0) e.push("Choose a schedule kind.")
-    if (problemAccount(p.beneficiary, null) !== "") e.push("Beneficiary must be an account ID (Public/<id> or Private/<id>).")
-    if (typeof p.token !== "string" || !/^[A-Za-z0-9]{2,10}$/.test(p.token.trim())) e.push("Token symbol must be 2–10 letters or digits.")
-    if (!/^\d+$/.test(String(p.amount == null ? "" : p.amount)) || num(p.amount) <= 0) e.push("Amount must be a positive whole number.")
-    var start = num(p.start), end = num(p.end), cliff = num(p.cliff || 0)
-    if (!isFinite(Number(p.start)) || start <= 0) e.push("Enter a valid start date.")
-    if (!isFinite(Number(p.end)) || end <= start) e.push("End date must be after the start date.")
-    if (p.kind === "cliff-linear" && (!isFinite(Number(p.cliff)) || cliff <= start || cliff >= end))
-        e.push("Cliff date must be between the start and end dates.")
+    if (problemAccount(p.beneficiary) !== "") e.push("Beneficiary: " + problemAccount(p.beneficiary))
+    if (tokenProblem(p.token)) e.push(tokenProblem(p.token))
+    if (p.kind !== "milestone") {
+        if (!/^\d+$/.test(String(p.amount == null ? "" : p.amount)) || num(p.amount) <= 0) e.push("Amount must be a positive whole number.")
+        e = e.concat(dateProblems(p))
+    }
     if (p.kind === "milestone") {
         var tr = p.tranches || []
         if (!Array.isArray(tr) || tr.length === 0) e.push("Add at least one milestone tranche.")
@@ -357,22 +420,53 @@ export function validateCreate(p) {
                 break
             }
     }
-    if (p.cancelAuthority && problemAccount(p.cancelAuthority, null) !== "") e.push("Cancel authority must be an account ID.")
-    if (p.milestoneAuthority && problemAccount(p.milestoneAuthority, null) !== "") e.push("Milestone authority must be an account ID.")
+    if (p.cancelAuthority && problemAccount(p.cancelAuthority) !== "") e.push("Cancel authority: " + problemAccount(p.cancelAuthority))
+    if (p.milestoneAuthority && problemAccount(p.milestoneAuthority) !== "") e.push("Milestone authority: " + problemAccount(p.milestoneAuthority))
     return { ok: e.length === 0, errors: e }
+}
+
+/// "LEZ" (native) or a token definition account; why not, or "".
+function tokenProblem(token) {
+    var t = String(token == null ? "" : token).trim()
+    if (isNative(t)) return ""
+    var k = accountKind(t)
+    return k === "hex" || k === "base58" ? "" : "Token must be LEZ or a token definition account (hex or base58)."
+}
+
+function dateProblems(p) {
+    var e = [], start = num(p.start), end = num(p.end), cliff = num(p.cliff || 0)
+    if (!isFinite(Number(p.start)) || start <= 0) e.push("Enter a valid start date.")
+    if (!isFinite(Number(p.end)) || end <= start) e.push("End date must be after the start date.")
+    if (p.kind === "cliff-linear" && (!isFinite(Number(p.cliff)) || cliff <= start || cliff >= end))
+        e.push("Cliff date must be between the start and end dates.")
+    return e
 }
 
 // ── Pre-claim confirmation: fee, privacy, result lines ──────────────────────────────
 
-/// Can the private account pay the estimated fee? { ok, message } with a clear error if not.
-export function canPayFee(gas, fee) {
-    var g = gas == null ? "" : String(gas), f = String(fee == null ? FEE : fee)
-    if (!/^\d+$/.test(g) || !/^\d+$/.test(f))
-        return { ok: false, message: "Couldn't read the private account's gas balance; try again." }
-    var feeText = amountText(f)
-    if (atLeast(g, f)) return { ok: true, message: "The private account can pay the estimated fee of " + feeText + "." }
-    return { ok: false, message: "The private account can't pay the estimated fee of " + feeText
-        + ". It holds " + amountText(g) + " for gas. Fund that account, or choose a public destination." }
+/// The fee check of a module pre-claim summary: {ok, message}. The module simulated the claim
+/// (the wallet's dry run) and says whether the fee's payer will hold enough; on a ledger
+/// without fees there is nothing to check.
+export function feeCheck(summary) {
+    summary = summary || {}
+    var fee = summary.estimated_fee_display || "0 LEZ"
+    var payer = summary.fee_payer === "claim_target"
+        ? "The private account (paid from what the claim brings it)"
+        : "Your public account"
+    if (!summary.fee_simulated) return { ok: true, message: "No network fee on this ledger." }
+    if (summary.revert_reason) return { ok: false, message: "The simulated claim would fail: " + summary.revert_reason }
+    if (summary.fee_covered === false)
+        return { ok: false, message: payer + " can't pay the estimated fee of " + fee + ": it will hold "
+            + (summary.fee_available_display || "0 LEZ") + ". Fund it, or choose a public destination." }
+    if (summary.fee_covered === true)
+        return { ok: true, message: payer + " can pay the estimated fee of " + fee + "." }
+    return { ok: true, message: "Estimated fee " + fee + "." }
+}
+
+/// A transaction answer ({hash, block}) as a short text, or "".
+export function txText(tx) {
+    if (!tx || !tx.hash) return ""
+    return "tx " + short(tx.hash) + (tx.block ? " in block " + tx.block : "")
 }
 
 /// The privacy disclosure shown before every private claim.
@@ -394,8 +488,9 @@ export function claimLine(amount, token, dest, tx, isPrivate) {
 
 /// Plain result line when the module already formatted the amount for display.
 export function claimLineDisplay(display, dest, tx, isPrivate) {
+    var t = typeof tx === "string" ? tx : txText(tx)
     return "Claimed " + display + " to " + dest + (isPrivate ? " (private)" : " (public)")
-        + (tx ? " · " + tx : "") + "."
+        + (t ? " · " + t : "") + "."
 }
 export function createLine(id) { return "Created schedule " + short(id) + "." }
 export function batchLine(n) { return "Created " + num(n) + " schedule" + (num(n) === 1 ? "" : "s") + "." }

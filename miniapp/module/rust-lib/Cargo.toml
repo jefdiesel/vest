@@ -1,0 +1,25 @@
+[package]
+name = "vesting_module"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# Standalone workspace: keeps cargo from adopting the repository's workspace, which the module
+# build cannot see. The staged repository crates under vest/ are its members and inherit these.
+[workspace]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["staticlib"]
+
+# Built only from a staged copy (../stage.sh), where vest/ holds the repository crates and the
+# builder puts logos-rust-sdk-src beside this folder. Cargo.lock is committed: the builder feeds
+# it to buildRustPackage. It starts from the workspace's own lock (the versions the tests ran).
+
+[dependencies]
+vesting-module-core = { path = "vest/miniapp/module/core", features = ["lez"] }
+serde_json = "1"
+logos-rust-sdk = { path = "../logos-rust-sdk-src" }

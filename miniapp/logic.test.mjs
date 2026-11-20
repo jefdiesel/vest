@@ -1,8 +1,8 @@
-// Checks the Vesting mini-app's own logic (src/qml/logic.mjs, which src/qml/Main.qml
-// imports), since the QML engine cannot run in CI. Run with: node --test miniapp/logic.test.mjs
+// Checks the Vesting mini-app's own logic (qml/logic.mjs, which qml/Main.qml imports), since
+// the QML engine cannot run in CI. Run with: node --test miniapp/logic.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as L from "./src/qml/logic.mjs";
+import * as L from "./qml/logic.mjs";
 import { readFileSync } from "node:fs";
 
 const check = (label, got, want) => {
@@ -65,27 +65,32 @@ check("next unlock: date + in 3 days", [nu.at, L.dateText(nu.at), /in 3 days/.te
 check("next unlock: milestone has no date", [/tranche 3/.test(L.nextUnlock(MILE, NOW).text), L.nextUnlock(MILE, NOW).at], [true, 0]);
 check("next unlock: all signalled", L.nextUnlock({ ...MILE, signalled: [true, true, true, true] }, NOW).text, "All milestones signalled.");
 
-// ── Accounts ──────────────────────────────────────────────────────────────────────────
-check("account: valid kinds", [L.problemAccount("Public/" + ID, false), L.problemAccount("Private/" + ID, true), L.problemAccount("Public/" + ID, null)], ["", "", ""]);
-check("account: wrong kind refused", /private/.test(L.problemAccount("Public/" + ID, true)), true);
-check("account: bad id refused", /base58/.test(L.problemAccount("Public/bad!0OIl", null)), true);
-check("account: missing prefix refused", /Public/.test(L.problemAccount(ID, null)), true);
-check("private target check", [L.privateTargetProblem("Private/" + ID), L.privateTargetProblem("Public/" + ID) === ""], ["", false]);
+// ── Accounts (addresses or LNS names; the module resolves names) ───────────────────
+const HEXID = "0a".repeat(32);
+check("account kinds", [L.accountKind("Public/" + ID), L.accountKind("Private/" + ID), L.accountKind(HEXID), L.accountKind(ID), L.accountKind("alice"), L.accountKind("not an account!")], ["base58", "base58", "hex", "base58", "name", ""]);
+check("account: names and addresses pass", [L.problemAccount("alice"), L.problemAccount(HEXID), L.problemAccount("Private/" + ID)], ["", "", ""]);
+check("account: junk and empty refused", [/not an account/.test(L.problemAccount("b@d!")), /Enter/.test(L.problemAccount("  "))], [true, true]);
+check("account: bad base58 after a prefix refused", L.problemAccount("Public/bad!0OIl") !== "", true);
 
 // ── Creation validation ───────────────────────────────────────────────────────────────
 const valid = (kind, extra) => ({ kind, beneficiary: "Public/" + ID, token: "LEZ", amount: "1000000", start: NOW, cliff: NOW + 30 * DAY, end: NOW + 365 * DAY, tranches: [], cancelable: true, transferable: false, ...extra });
 check("validateCreate: valid kinds", [L.validateCreate(valid("cliff-linear")).ok, L.validateCreate(valid("linear")).ok, L.validateCreate(valid("milestone", { tranches: ["250000", "750000"] })).ok], [true, true, true]);
 check("validateCreate: bad kind", L.validateCreate(valid("other")).ok, false);
-check("validateCreate: bad beneficiary", L.validateCreate(valid("linear", { beneficiary: "nope" })).ok, false);
+check("validateCreate: bad beneficiary", L.validateCreate(valid("linear", { beneficiary: "no pe!" })).ok, false);
+check("validateCreate: a name or hex beneficiary", [L.validateCreate(valid("linear", { beneficiary: "alice" })).ok, L.validateCreate(valid("linear", { beneficiary: HEXID })).ok], [true, true]);
+check("validateCreate: token is LEZ or a definition", [L.validateCreate(valid("linear", { token: HEXID })).ok, L.validateCreate(valid("linear", { token: "DOGE" })).ok], [true, false]);
 check("validateCreate: bad amount", L.validateCreate(valid("linear", { amount: "-1" })).ok, false);
 check("validateCreate: bad dates", [L.validateCreate(valid("linear", { end: NOW - DAY })).ok, L.validateCreate(valid("cliff-linear", { cliff: NOW - DAY })).ok], [false, false]);
 check("validateCreate: milestone needs tranches", [L.validateCreate(valid("milestone")).ok, L.validateCreate(valid("milestone", { tranches: ["0"] })).ok], [false, false]);
-check("validateCreate: bad authority", L.validateCreate(valid("linear", { cancelAuthority: "bad" })).ok, false);
+check("validateCreate: bad authority", L.validateCreate(valid("linear", { cancelAuthority: "b@d" })).ok, false);
 
 // ── Pre-claim confirmation ────────────────────────────────────────────────────────────
-check("canPayFee: enough", [L.canPayFee("10", "2").ok, /can pay/.test(L.canPayFee("10", "2").message)], [true, true]);
-const short = L.canPayFee("1", "2");
-check("canPayFee: not enough is clear", [short.ok, /can't pay/.test(short.message), /2 LEZ/.test(short.message), /Fund that account/.test(short.message)], [false, true, true, true]);
+const SIM = { fee_simulated: true, estimated_fee_display: "0.000012 LEZ", fee_available_display: "0.00001 LEZ" };
+check("feeCheck: covered", [L.feeCheck({ ...SIM, fee_covered: true, fee_payer: "caller" }).ok, /can pay the estimated fee of 0.000012 LEZ/.test(L.feeCheck({ ...SIM, fee_covered: true }).message)], [true, true]);
+const shortFee = L.feeCheck({ ...SIM, fee_covered: false, fee_payer: "claim_target" });
+check("feeCheck: not covered is clear", [shortFee.ok, /private account/.test(shortFee.message), /can't pay/.test(shortFee.message), /0.00001 LEZ/.test(shortFee.message)], [false, true, true, true]);
+check("feeCheck: a reverting claim is refused", L.feeCheck({ ...SIM, fee_covered: true, revert_reason: "x" }).ok, false);
+check("feeCheck: no fee on a local ledger", [L.feeCheck({ fee_simulated: false }).ok, /No network fee/.test(L.feeCheck({}).message)], [true, true]);
 const pd = L.privacyDisclosure();
 check("privacy disclosure: visible", [pd.visible.length, /claim amount/.test(pd.text), /beneficiary address/.test(pd.text), /vesting schedule address/.test(pd.text)], [3, true, true, true]);
 check("privacy disclosure: not traceable", [/which private account/.test(pd.text), /any later movement/.test(pd.text)], [true, true]);
@@ -94,16 +99,32 @@ check("privacy disclosure: not traceable", [/which private account/.test(pd.text
 check("claimLine: private", L.claimLine("300000", "LEZ", "Private/" + ID, "tx1", true), "Claimed 300,000 LEZ to Private/" + ID + " (private) · tx1.");
 check("claimLine: public", /\(public\)/.test(L.claimLine("1", "LEZ", "Public/" + ID, "", false)), true);
 check("claimLineDisplay uses the module's string", L.claimLineDisplay("0.094138 LEZ", "Private/" + ID, "tx9", true), "Claimed 0.094138 LEZ to Private/" + ID + " (private) · tx9.");
+check("claimLineDisplay with the module's tx", L.claimLineDisplay("1 LEZ", "x", { hash: "c5d782913d8819b009c8d15815697b20", block: 39066 }, false), "Claimed 1 LEZ to x (public) · tx c5d782…7b20 in block 39066.");
 check("result lines", [L.createLine("SCHED-1234567890"), L.cancelLine("SCHED-1234567890"), L.signalLine(2, "SCHED-1234567890")], ["Created schedule SCHED-…7890.", "Cancelled schedule SCHED-…7890.", "Signalled milestone 3 on SCHED-…7890."]);
 check("nothingClaimable", /in 3 days/.test(L.nothingClaimable(CLIFF, NOW)), true);
 
-// ── LNS names ───────────────────────────────────────────────────────────────────────
-const NAMES = { alice: "Public/" + ID, bob: "Private/" + ID };
-check("nameOf", [L.nameOf("Public/" + ID, NAMES), L.nameOf("Public/other", NAMES), L.nameOf("Public/" + ID, {})], ["alice", "", ""]);
-check("labelled", [L.labelled("Public/" + ID, NAMES), L.labelled("Public/other", NAMES)], ["alice · " + L.short("Public/" + ID), L.short("Public/other")]);
-check("accountInput resolves a name", L.accountInput("  ALICE  ", NAMES), { ok: true, account: "Public/" + ID, error: "" });
-check("accountInput passes an account through", L.accountInput("Private/" + ID, NAMES), { ok: true, account: "Private/" + ID, error: "" });
-check("accountInput refuses junk", L.accountInput("not-a-name", NAMES).ok, false);
+// ── LNS names: the module's name book is {hex account: name} ─────────────────────
+const NAMES = { [HEXID]: "alice" };
+check("nameOf", [L.nameOf(HEXID, NAMES), L.nameOf(HEXID.toUpperCase(), NAMES), L.nameOf("0b".repeat(32), NAMES)], ["alice", "alice", ""]);
+check("labelled", [L.labelled(HEXID, NAMES), L.labelled("0b".repeat(32), {})], ["alice · " + L.short(HEXID), L.short("0b".repeat(32))]);
+check("accountInput passes names and accounts through", [L.accountInput("  alice ").account, L.accountInput("Private/" + ID).ok], ["alice", true]);
+check("accountInput refuses junk", L.accountInput("not a name!").ok, false);
+check("resolvedLines", L.resolvedLines([{ name: "alice", base58: ID }]), ["alice resolves to " + ID + "."]);
+
+// ── Module replies ───────────────────────────────────────────────────────────────
+check("reply: plain, once and twice encoded", [L.reply('{"ok":true,"id":1}').id, L.reply(JSON.stringify('{"ok":true,"id":2}')).id, L.reply({ ok: false, error: "x" }).error], [1, 2, "x"]);
+check("reply: a missing module", [L.reply("Module not connected: vesting").ok, L.reply("Module not connected: vesting").missing], [false, true]);
+check("reply: no answer", [L.reply("").ok, /No answer/.test(L.reply(undefined).error)], [false, true]);
+
+// ── The module's data ─────────────────────────────────────────────────────────────
+const ROW = { id: 3, kind: { type: "cliff-linear", start: 1, cliff: 5, end: 9 }, token: "0".repeat(64), total: "9", claimed: "0", signalled: [], mine: { beneficiary: true } };
+const flat = L.fromModule(ROW);
+check("fromModule flattens the kind", [flat.kind, flat.start, flat.cliff, flat.end, flat.tokenLabel, flat.mine.beneficiary, flat.id], ["cliff-linear", 1, 5, 9, "LEZ", true, 3]);
+check("fromModule: milestone tranches", L.fromModule({ kind: { type: "milestone", tranches: ["4", "6"] }, signalled: [true, false] }).tranches, ["4", "6"]);
+check("fromModule: maths work on the adapted row", L.claimable(flat, 9), "9");
+const made = L.toCreateRow({ kind: "cliff-linear", beneficiary: " alice ", token: "LEZ", amount: "100", start: 1, cliff: 2, end: 3, cancelable: true, transferable: false, cancelAuthority: "", milestoneAuthority: "bob" }, HEXID);
+check("toCreateRow", made, { creator: HEXID, beneficiary: "alice", token: "LEZ", total: "100", kind: { type: "cliff-linear", start: 1, end: 3, cliff: 2 }, cancelable: true, transferable: false, cancel_authority: null, milestone_authority: "bob" });
+check("toCreateRow: milestone total is the tranche sum", L.toCreateRow({ kind: "milestone", beneficiary: "a", token: "LEZ", tranches: ["40", "60"] }, HEXID).total, "100");
 
 // ── Batch creation ──────────────────────────────────────────────────────────────────
 check("parseTrancheText", [L.parseTrancheText("100000, 200000;300000"), L.parseTrancheText(""), L.parseTrancheText("1,,2")], [["100000", "200000", "300000"], [], ["1", "2"]]);
@@ -118,7 +139,7 @@ check("batchLine", [L.batchLine(1), L.batchLine(3)], ["Created 1 schedule.", "Cr
 
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;
-for (const file of ["./src/qml/Main.qml", "./src/qml/logic.mjs"]) {
+for (const file of ["./qml/Main.qml", "./qml/logic.mjs"]) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
   const dotted = source
     .map((line, i) => [i + 1, line.replace(/"(\\.|[^"\\])*"|'(\\.|[^'\\])*'|\/\/.*$/g, '""')])
