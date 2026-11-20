@@ -144,15 +144,35 @@ check("batchLine", [L.batchLine(1), L.batchLine(3)], ["Created 1 schedule.", "Cr
 // ── Every module call passes text: Basecamp refuses a QML number for an integer parameter ──
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
-  const calls = [...qml.matchAll(/\bcall\("(\w+)",\s*(\[[^\]]*\])/g)];
+  const calls = [...qml.matchAll(/\b(?:call|write)\((?:"[^"]*"(?:\s*\+\s*[^,]+)?,\s*)?"(\w+)",\s*(\[[^\]]*\]|\w+)/g)];
   check("Main.qml calls the module", calls.length >= 12, true);
   check("no module call passes a Number(…)", calls.filter(([, , args]) => /Number\(/.test(args)).map(([, m]) => m), []);
   check("ids handed to calls are made with String(…)", [...qml.matchAll(/\bid = (\w+)\(/g)].map(m => m[1]).filter(f => f !== "String"), []);
 }
 
+// ── Plain words on the screen ────────────────────────────────────────────────────
+check("toBase: LEZ to base units, exact", [L.toBase("0.5"), L.toBase("1,000"), L.toBase(".000000001"), L.toBase("2"), L.toBase("1.0000000001"), L.toBase("x"), L.toBase(""), L.toBase("0")], ["500000000", "1000000000000", "1", "2000000000", "", "", "", ""]);
+check("toBase: token decimals", L.toBase("1.5", 2), "150");
+const NOWALLET = { ok: true, connected: false, status: "not opened yet", settings: { wallet_dir: "" } };
+check("first run: no wallet chosen is not an error", [L.firstRun(NOWALLET), L.connectProblem(NOWALLET)], [true, ""]);
+check("a saved wallet not opened yet is not an error either", L.connectProblem({ connected: false, status: "not opened yet", settings: { wallet_dir: "/w" } }), "");
+check("a wrong folder says so plainly", L.connectProblem({ connected: false, status: "no wallet at /w", settings: { wallet_dir: "/w" } }), "No wallet found in that folder. Choose the folder that holds wallet_config.json and storage.json.");
+check("an encrypted wallet, another chain", [/password/.test(L.connectProblem({ connected: false, status: "the wallet is encrypted: give its password", settings: { wallet_dir: "/w" } })), /different network/.test(L.connectProblem({ connected: false, status: "https://x serves chain ab, not cd", settings: { wallet_dir: "/w" } }))], [true, true]);
+check("connected: no problem, no first run", [L.connectProblem({ connected: true }), L.firstRun({ connected: true, settings: {} })], ["", false]);
+check("isFinished", [L.isFinished({ total: "10", claimed: "10" }), L.isFinished({ total: "10", claimed: "3" }), L.isFinished({ total: "10", claimed: "3", cancelled: true })], [true, false, true]);
+check("confirm sheet: cancel", L.confirmText("cancel", { id: 0, locked_display: "0.000347 LEZ" }), "Cancel schedule 0? The unvested 0.000347 LEZ goes back to you. This can't be undone.");
+check("confirm sheet: irrevocable", /can't be undone/.test(L.confirmText("irrevocable", { id: 2 })), true);
+check("scheduleTitle", L.scheduleTitle({ id: 3, kind: "cliff-linear", total_display: "1.5 LEZ" }), "Schedule 3 · cliff, then linear · 1.5 LEZ");
+check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nameswallet.app/"), L.hostOf("http://127.0.0.1:3071")], ["abc", "lez.nameswallet.app", "127.0.0.1:3071"]);
+{
+  const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  check("no 'hex or base58' wording on the screen", /hex or base58/i.test(qml), false);
+  check("the kit is used, Vest's own copies are gone", [/import "kit"/.test(qml), /component (Action|Field|Link|Toggle|Fact|Panel):/.test(qml)], [true, false]);
+}
+
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;
-for (const file of ["./qml/Main.qml", "./qml/logic.mjs"]) {
+for (const file of ["./qml/Main.qml", "./qml/logic.mjs", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
   const dotted = source
     .map((line, i) => [i + 1, line.replace(/"(\\.|[^"\\])*"|'(\\.|[^'\\])*'|\/\/.*$/g, '""')])

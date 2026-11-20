@@ -507,3 +507,78 @@ export function signalLine(index, id) { return "Signalled milestone " + (num(ind
 
 /// The actionable error when a claim is attempted before anything is vested.
 export function nothingClaimable(s, now) { return "Nothing claimable yet. " + nextUnlock(s, now).text }
+
+// ── Plain words for the screen ────────────────────────────────────────────────────────
+
+/// Native LEZ has 9 decimals.
+export const DECIMALS = 9
+
+/// "0.5" LEZ → "500000000" (base units), or "" when it isn't a positive amount with at most
+/// `decimals` decimals. Exact: works on the digits, never on floats.
+export function toBase(text, decimals) {
+    var d = decimals === undefined ? DECIMALS : decimals
+    var s = String(text == null ? "" : text).trim().replace(/,/g, "")
+    var m = /^(\d*)(?:\.(\d*))?$/.exec(s)
+    if (!m || (m[1] === "" && (m[2] || "") === "")) return ""
+    var frac = m[2] || ""
+    if (frac.length > d) return ""
+    while (frac.length < d) frac += "0"
+    var out = ((m[1] || "") + frac).replace(/^0+/, "")
+    return out === "" ? "" : out
+}
+
+/// What went wrong connecting, as the person can act on it ("" when nothing did, or before
+/// they tried: a first run is not an error). `status` is the module's own words.
+export function connectProblem(info) {
+    if (!info || info.connected) return ""
+    var s = info.settings || {}
+    if (!String(s.wallet_dir || "").trim()) return ""
+    var why = String(info.status || "")
+    if (why === "" || /not opened yet/i.test(why)) return ""
+    if (/no wallet at|storage\.json|No such file/i.test(why)) return "No wallet found in that folder. Choose the folder that holds wallet_config.json and storage.json."
+    if (/encrypted/i.test(why)) return "This wallet is locked with a password. Enter it in Settings."
+    if (/serves chain/i.test(why)) return "That RPC is on a different network than the one chosen. Check the network settings."
+    if (/getChannelId|error sending request|connection|timed out|dns/i.test(why)) return "Can't reach the network right now. Check the connection and try again."
+    if (/no vesting program/i.test(why)) return "This network has no Vest program. Set one in the network settings."
+    return "Couldn't connect: " + why.replace(/^Not connected:\s*/i, "") + (/[.?!]$/.test(why) ? "" : ".")
+}
+
+/// Whether the first-run card shows: nothing connected and no wallet chosen yet.
+export function firstRun(info) {
+    return !!info && !info.connected && !String((info.settings || {}).wallet_dir || "").trim()
+}
+
+/// A finished schedule has nothing left to cancel, claim or signal.
+export function isFinished(s) {
+    s = s || {}
+    return !!s.cancelled || (String(s.total) !== "" && norm(s.claimed) === norm(s.total))
+}
+
+/// The confirm sheet's words for a step that can't be undone.
+export function confirmText(kind, s) {
+    s = s || {}
+    if (kind === "cancel")
+        return "Cancel schedule " + s.id + "? The unvested " + (s.locked_display || "amount") + " goes back to you. This can't be undone."
+    if (kind === "irrevocable")
+        return "Make schedule " + s.id + " irrevocable? Nobody can cancel it after this. This can't be undone."
+    return ""
+}
+
+/// "Schedule 3 · linear · 1.5 LEZ".
+export function scheduleTitle(s) {
+    s = s || {}
+    var kinds = { "linear": "linear", "cliff-linear": "cliff, then linear", "milestone": "milestones" }
+    return "Schedule " + s.id + " · " + (kinds[s.kind] || s.kind) + " · " + (s.total_display || "")
+}
+
+/// Text from outside (a network's name, a reason) made safe to show: no control or bidi
+/// characters, at most 200 characters.
+export function clean(text) {
+    return String(text == null ? "" : text).replace(/[\u0000-\u001f\u007f‎‏‪-‮⁦-⁩]/g, "").slice(0, 200)
+}
+
+/// "https://lez.nameswallet.app/" → "lez.nameswallet.app".
+export function hostOf(url) {
+    var m = /^[a-z]+:\/\/([^\/?#]+)/i.exec(String(url == null ? "" : url))
+    return m ? m[1] : String(url == null ? "" : url)
+}

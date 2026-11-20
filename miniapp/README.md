@@ -41,8 +41,8 @@ unless it is local (`127.0.0.1`).
 ## Build and test
 
 ```sh
-node --test miniapp/logic.test.mjs                 # the view's logic (75 tests)
-cargo test -p vesting-module-core                  # every module call on the JSON test ledger (12 tests)
+node --test miniapp/logic.test.mjs                 # the view's logic (105 tests)
+cargo test -p vesting-module-core                  # every module call on the JSON test ledger (13 tests)
 cargo build -p vesting-module-core --features lez  # the chain build of the module's core
 ```
 
@@ -63,9 +63,15 @@ module's own two crates. Loading and clicking through: [`docs/BASECAMP-TEST.md`]
 loads: it lists every undefined symbol nothing provides (the plugin links with
 `-undefined dynamic_lookup`, so a missing library only shows at load) and dlopens it.
 
-`tools/render.py` renders `qml/Main.qml` offscreen with a stand-in module (8 scenarios: positions,
-public and private confirmations, a fee the private account can't pay, creator, settings, not
-connected, module missing) and fails on any QML error.
+`tools/render.py` renders `qml/Main.qml` offscreen at 1250x700 with a stand-in module (11
+scenarios: first run, no schedules, a schedule, public and private confirmations, a fee the
+private account can't pay, create, the cancel confirmation, settings, a wrong wallet folder, the
+module missing) and fails on any QML error.
+
+The screen uses the shared kit in `qml/kit/` (Look, Action, PageHeader, Field, FactRow,
+TechDetails, Tick, Link, RunsOn, BackButton), copied unchanged from the Program Registry browser
+(jefdiesel/lez-program-registry `guide-ui`, `registry_browser/qml/kit/`): one left-aligned column
+at most 680 px wide, 56 px from the window's edge, as in the Names Wallet.
 
 ## Known limits
 

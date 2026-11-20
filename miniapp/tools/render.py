@@ -17,10 +17,17 @@ NOW = 1795200000000
 DAY = 86400000
 
 
+def lez(units):
+    whole, frac = divmod(int(units), 10**9)
+    text = f"{whole:,}" + ("." + f"{frac:09d}".rstrip("0") if frac else "")
+    return text + " LEZ"
+
+
 def schedule(id, kind, total, claimed, claimable, mine, **extra):
+    locked = str(int(total) - int(claimed) - int(claimable))
     row = {"id": id, "kind": kind, "creator": ME, "beneficiary": ME, "token": "00" * 32, "total": total,
-           "total_display": total + " LEZ", "claimed": claimed, "claimed_display": claimed + " LEZ",
-           "claimable": claimable, "claimable_display": claimable + " LEZ", "locked": "0", "locked_display": "1,000 LEZ",
+           "total_display": lez(total), "claimed": claimed, "claimed_display": lez(claimed),
+           "claimable": claimable, "claimable_display": lez(claimable), "locked": locked, "locked_display": lez(locked),
            "signalled": [], "cancelable": True, "transferable": True, "cancel_authority": ME, "milestone_authority": ME,
            "cancelled": False, "address": "44" * 32, "mine": mine}
     row.update(extra)
@@ -28,9 +35,9 @@ def schedule(id, kind, total, claimed, claimable, mine, **extra):
 
 
 LIST = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
-    schedule(0, {"type": "linear", "start": NOW - 30 * DAY, "end": NOW + 330 * DAY}, "12000", "500", "486",
+    schedule(0, {"type": "linear", "start": NOW - 30 * DAY, "end": NOW + 330 * DAY}, "1000000", "52000", "31333",
              {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True}),
-    schedule(1, {"type": "milestone", "tranches": ["400", "600"]}, "1000", "0", "0",
+    schedule(1, {"type": "milestone", "tranches": ["400000", "600000"]}, "1000000", "0", "400000",
              {"beneficiary": False, "creator": True, "cancel_authority": True, "milestone_authority": True},
              beneficiary=OTHER, signalled=[True, False]),
 ]}
@@ -53,19 +60,25 @@ def summary(covered, payer, private):
             "revert_reason": None, "next_unlock": NOW + 330 * DAY, "destination_kind": "private" if private else "public"}}
 
 
+FIRST = dict(SETTINGS, connected=False, status="not opened yet", settings=dict(SETTINGS["settings"], wallet_dir=""))
+WRONG = dict(SETTINGS, connected=False, status="no wallet at ~/lez-wallet")
+
 SCENARIOS = {
+    "first-run": ({"settings": FIRST}, ""),
+    "recipient-empty": ({"list": {"ok": True, "time": NOW, "names": {}, "schedules": []}}, ""),
     "recipient": ({}, ""),
     "confirm-public": ({"pre_claim_summary": summary(True, "caller", False)}, "root.beginClaim()"),
     "confirm-private": ({"pre_claim_summary": summary(True, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
     "confirm-private-short": ({"pre_claim_summary": summary(False, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
     "creator": ({}, "root.tab = 'creator'"),
+    "confirm-cancel": ({}, "root.tab = 'creator'; root.askGrave('cancel', root.mySchedules[0])"),
     "settings": ({}, "root.tab = 'settings'"),
-    "not-connected": ({"settings": dict(SETTINGS, connected=False, status="set the wallet folder (a LEZ rc3 wallet) in Settings")}, "root.tab = 'settings'"),
+    "not-connected": ({"settings": WRONG}, ""),
     "no-module": ({"__missing": True}, ""),
 }
 
 BRIDGE = r"""
-    width: 980; height: %(height)s
+    width: 1250; height: %(height)s
     property var logos: QtObject {
         function callModuleAsync(module, method, args, callback, timeout) {
             var reply = callModule(module, method, args)
@@ -98,7 +111,7 @@ def main():
         answers = {"settings": SETTINGS, "accounts": ACCOUNTS, "list": LIST, "now": {"ok": True, "time": NOW}}
         answers.update(extra)
         out = os.path.join(out_dir, name + ".png")
-        bridge = BRIDGE % {"answers": json.dumps(answers), "scenario": script or "0", "out": out, "height": 1900}
+        bridge = BRIDGE % {"answers": json.dumps(answers), "scenario": script or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
         with tempfile.NamedTemporaryFile("w", suffix=".qml", delete=False, dir=os.path.join(HERE, "..", "qml")) as handle:
             handle.write(source.replace(marker, marker + bridge, 1))
         try:

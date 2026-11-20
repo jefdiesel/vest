@@ -11,7 +11,7 @@ transaction on the public LEZ rc3 demo chain (`https://lez.nameswallet.app/`), w
 ## 0. What you need
 
 - The two packages built by `miniapp/module/stage.sh` + nix (see `miniapp/README.md`):
-  `vesting-0.2.0.lgx` (the core module) and `vesting_ui-0.2.0.lgx` (the app). Check their sha256
+  `vesting-0.2.0.lgx` (the core module) and `vesting_ui-0.2.1.lgx` (the app). Check their sha256
   against the build's `SHA256SUMS` before installing.
 - A LEZ rc3 wallet folder (`wallet_config.json` + `storage.json`) with two public accounts, `A`
   (creator) and `B` (beneficiary), and one private account `P`, all on the demo chain. With the
@@ -34,10 +34,10 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
 
 ## 1. Install
 
-1. Basecamp, install from file: `vesting-0.2.0.lgx` first, then `vesting_ui-0.2.0.lgx`.
-2. Open **Vesting**. Expected: the header says "Not connected: open Settings." and a red line
-   says why (no wallet folder yet). If it instead says the Vesting module isn't installed, the
-   core module didn't load: stop and collect Basecamp's log.
+1. Basecamp, install from file: `vesting-0.2.0.lgx` first, then `vesting_ui-0.2.1.lgx`.
+2. Open **Vesting**. Expected: no red text; a card "Connect a wallet to start" with **Open
+   settings**. If it instead says the Vesting module isn't installed, the core module didn't
+   load: stop and collect Basecamp's log.
 
 ## 2. Settings and the chain check
 
@@ -55,7 +55,7 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
 
 ## 3. Creator view: create
 
-1. **Creator** tab. The wallet's public accounts are listed with balances; choose `A`.
+1. **Create** tab. The wallet's public accounts are listed with balances; choose `A`.
 2. Cliff + linear is preselected: choose **Linear**. Token `LEZ`. Start date: yesterday. End date:
    tomorrow + 1 day. Beneficiary: `B`'s base58. Total amount `1000000`.
 3. **Create schedule**. Expected: "Creating…", then Result "Created schedule 0. tx …… in block N".
@@ -65,14 +65,14 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
 
 ## 4. Recipient view: summary, public claim
 
-1. **Recipient** tab. Expected: positions `0 · linear · LEZ` and `1 · milestone · LEZ`; choose 0.
+1. **Your schedules** tab. Expected: positions `0 · linear · LEZ` and `1 · milestone · LEZ`; choose 0.
    The facts show the schedule account, beneficiary, total, locked, claimed 0, chain time; "2. Claim"
    shows "Claimable now: …" above 0 (about a third of it, by the dates).
-2. **Public account** is chosen; "Pays" names `B`. Press **Claim**. Expected: "Checking the fee…",
-   then the **Confirm claim** panel: the claimable amount, an **Estimated fee** above 0 (the
+2. **Public account** is chosen; "Pays" names `B`. Press **Check claim**. Expected: "Checking the fee…",
+   then the **Claim …** panel: the claimable amount, an **Estimated fee** above 0 (the
    simulated fee of this very claim), destination `B (public)`, and a green line "Your public
    account can pay the estimated fee of …". No privacy text.
-3. **Confirm claim**. Expected: "Claiming…", then Result "Claimed … LEZ to … (public) · tx …
+3. **Claim …**. Expected: "Claiming…", then Result "Claimed … LEZ to … (public) · tx …
    in block N"; Claimed in the facts goes up and Claimable drops to (nearly) 0.
 4. Choose position 1 (milestone, nothing signalled) and **Claim**. Expected: no confirmation;
    Result "Nothing claimable yet. Next unlock: tranche 1 — signalled by the creator."
@@ -86,13 +86,13 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
    Not traceable: which private account receives the tokens, any later movement of those
    tokens."), the estimated fee of the private claim, and the fee check: green "The private
    account (paid from what the claim brings it) can pay …" when the claimable amount covers the
-   fee, or red "… can't pay the estimated fee …" with **Confirm claim** disabled when it doesn't.
+   fee, or red "… can't pay the estimated fee …" with **Claim …** disabled when it doesn't.
 3. Press **Cancel** (Result: "Claim not sent."). Confirming would prove the claim on this machine
    (about 10 minutes with a real proof on this chain); only do it on purpose.
 
 ## 6. Creator actions
 
-1. **Creator** tab, schedule 1: **Signal tranche 1**. Expected: "Signalling…", then "Signalled
+1. **Create** tab, schedule 1: **Signal tranche 1**. Expected: "Signalling…", then "Signalled
    milestone 1 on 1. Unlocked 0.0003 LEZ." and the button disappears. Signal it again is no
    longer offered; schedule 1 is now claimable on the Recipient tab (claim it publicly as in 4).
 2. Schedule 0: **Make irrevocable**. Expected: "Made schedule 0 irrevocable."; its row says
@@ -102,11 +102,11 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
 
 ## 7. Batch, names, import
 
-1. **Creator**, **Batch (one token, one transaction)**, Linear, dates as in 3, two rows: `B` with
+1. **Create**, **Several people, one transaction**, Linear, dates as in 3, two rows: `B` with
    `200000`, and (if you have one) `B`'s LNS name with `300000`; **Create 2 schedules**. Expected:
    Result "<name> resolves to <B's base58>. Created 2 schedules. tx … in block N" (one transaction).
    A mistyped name fails with "unknown LNS name '…'" and nothing is created.
-2. **Recipient**, Import: paste the schedule account of a schedule made elsewhere for `B` (for
+2. **Your schedules**, Add a schedule: paste the schedule account of a schedule made elsewhere for `B` (for
    example by the CLI); **Import**. Expected: "Imported the schedule as N." and it is listed.
    An account that is not a schedule of this program is refused with a plain error.
 

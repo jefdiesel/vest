@@ -1,7 +1,7 @@
 {
   "name": "vesting_ui",
   "display_name": "Vesting",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "ui_qml",
   "category": "finance",
   "description": "View and manage LEZ vesting schedules: claim to a public or private account, create, cancel, signal, transfer",
