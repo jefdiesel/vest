@@ -1,6 +1,6 @@
 //! Full lifecycle API for modules built on the vesting program.
 
-use crate::backend::{Backend, ScheduleId};
+use crate::backend::{Backend, FeeEstimate, ScheduleId};
 use crate::error::SdkError;
 use vesting_core::{
     cancel, claim, claimable, create, create_batch, make_irrevocable, next_unlock,
@@ -8,24 +8,18 @@ use vesting_core::{
     Timestamp,
 };
 
-/// Placeholder until the program publishes a real fee estimate (RFP Usability 4).
-pub const ESTIMATED_FEE_PLACEHOLDER: Amount = 0;
-
 /// Account kinds, modelled locally until LEZ exposes them in a shared crate.
 ///
-/// Important: for now the caller declares the kind, so `claim_private` only
-/// checks what the caller says. When the real LEZ backend lands, the kind must
-/// come from the wallet (a private account the wallet actually holds), not
-/// from a flag supplied by the caller.
+/// The kind a caller declares is only a first check: `claim_private` refuses a target declared
+/// public before anything is sent, and `LezBackend` then asks the wallet whether the target is a
+/// private account it holds, refusing otherwise. A flag cannot make an account private.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountKind {
     Public,
     Private,
 }
 
-/// A destination account together with its kind. As with [`AccountKind`], the
-/// kind is caller-supplied today and must come from the wallet once the LEZ
-/// backend is real.
+/// A destination account together with its declared kind (see [`AccountKind`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountRef {
     pub id: AccountId,
@@ -48,14 +42,65 @@ impl AccountRef {
     }
 }
 
-/// What a module shows the user before asking them to confirm a claim.
+/// What a module shows the user before asking them to confirm a claim (RFP Usability 4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreClaimSummary {
     pub schedule: ScheduleId,
     pub claimable: Amount,
+    /// The simulated fee (native LEZ). 0 when nothing is claimable or the backend charges none.
     pub estimated_fee: Amount,
+    /// The backend's simulation of this claim; `None` when nothing is claimable now or the
+    /// backend charges no fees (a local ledger).
+    pub fee: Option<FeeEstimate>,
+    /// Whether the fee's payer can pay it, when the backend can tell (the private path's gas
+    /// check): `Some(false)` means the claim would be refused for its fee.
+    pub fee_covered: Option<bool>,
     pub next_unlock: Option<Timestamp>,
     pub destination_kind: AccountKind,
+}
+
+/// The pre-claim summary of schedule `id` for `caller` claiming to `destination` (the
+/// beneficiary's own account for a public claim, a private account for a private one), at the
+/// backend's time. When something is claimable it simulates the very claim transaction to get
+/// its fee (`Backend::estimate_fee`); nothing is sent. A private destination declared public is
+/// refused as `claim_private` refuses it.
+pub fn pre_claim_summary<B: Backend>(
+    backend: &mut B,
+    id: ScheduleId,
+    caller: AccountId,
+    destination: AccountRef,
+) -> Result<PreClaimSummary, SdkError> {
+    let now = backend.now();
+    let state = backend
+        .load(id)
+        .map_err(|error| SdkError::Backend(error.to_string()))?;
+    let claimable_now = state.claimable_at(now);
+    let to_private = destination.kind == AccountKind::Private;
+    let mut fee = None;
+    if claimable_now > 0 {
+        if to_private {
+            backend.set_claim_target(destination.id);
+        }
+        // The claim the client would send, as `Client::claim` builds it. A claim the rules refuse
+        // (a caller who is not the beneficiary) is the same error the claim itself would give.
+        let (next, _amount, event) = claim(&state, caller, now, to_private)?;
+        backend.set_caller(caller);
+        fee = backend
+            .estimate_fee(id, &next, &event)
+            .map_err(|error| SdkError::Backend(error.to_string()))?;
+    }
+    let fee_covered = fee
+        .as_ref()
+        .and_then(|estimate| estimate.available.map(|have| have >= estimate.fee));
+    Ok(PreClaimSummary {
+        schedule: id,
+        claimable: claimable_now,
+        estimated_fee: fee.as_ref().map_or(0, |estimate| estimate.fee),
+        fee,
+        fee_covered,
+        next_unlock: next_unlock(&state, now),
+        destination_kind: destination.kind,
+    })
 }
 
 pub struct Client<B: Backend> {
@@ -134,20 +179,20 @@ impl<B: Backend> Client<B> {
         Ok(claimable(&self.schedule(id)?, self.now()))
     }
 
-    /// Pre-claim summary for either destination kind (RFP Usability 4).
+    /// Pre-claim summary with the simulated fee (RFP Usability 4); see [`pre_claim_summary`].
+    /// A public claim always pays the beneficiary: pass `AccountRef::public(beneficiary)`.
     pub fn pre_claim_summary(
-        &self,
+        &mut self,
         id: ScheduleId,
-        destination_kind: AccountKind,
+        caller: AccountId,
+        destination: AccountRef,
     ) -> Result<PreClaimSummary, SdkError> {
-        let state = self.schedule(id)?;
-        Ok(PreClaimSummary {
-            schedule: id,
-            claimable: state.claimable_at(self.now()),
-            estimated_fee: ESTIMATED_FEE_PLACEHOLDER,
-            next_unlock: next_unlock(&state, self.now()),
-            destination_kind,
-        })
+        pre_claim_summary(&mut self.backend, id, caller, destination)
+    }
+
+    /// The backend, mutably (backend-specific calls: import, balances, ...).
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
     }
 
     /// Claim to whichever destination the core event flag describes.

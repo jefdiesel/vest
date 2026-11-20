@@ -1,7 +1,7 @@
 //! Command-line argument definitions.
 //!
-//! Account arguments are raw text: a 64-hex address or an LNS name. They are
-//! resolved at the moment of the action in `names.rs`.
+//! Account arguments are raw text: an address (64 hex, or base58) or an LNS name. They are
+//! resolved at the moment of the action by `vesting_sdk::names`.
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
@@ -146,6 +146,18 @@ pub enum Command {
 
     /// Show how much is claimable now, and when the next unlock is.
     Claimable { schedule: u64 },
+
+    /// Pre-claim summary: claimable now, the simulated fee of the claim (on LEZ) and whether its
+    /// payer can pay it, the next unlock. Sends nothing.
+    Summary {
+        schedule: u64,
+        /// Summarise a private claim to this private account instead of a public claim.
+        #[arg(long)]
+        to_private: Option<AccountArg>,
+        /// Act as this account (defaults to the beneficiary).
+        #[arg(long)]
+        as_account: Option<AccountArg>,
+    },
 
     /// Claim everything currently vested.
     Claim {

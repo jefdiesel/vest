@@ -7,6 +7,7 @@ use std::process::{Command, Output, Stdio};
 
 const A: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const B: &str = "0202020202020202020202020202020202020202020202020202020202020202";
+const C: &str = "0404040404040404040404040404040404040404040404040404040404040404";
 const TOKEN: &str = "0303030303030303030303030303030303030303030303030303030303030303";
 
 struct Fixture {
@@ -108,6 +109,13 @@ fn linear_lifecycle() {
     let claimable = f.ok(500, &["claimable", "0"]);
     assert!(claimable.contains("claimable now: 500 of 1000"));
     assert!(claimable.contains("next unlock in"));
+
+    // The pre-claim summary: on the JSON ledger nothing is simulated and there is no fee.
+    let summary = f.ok(500, &["summary", "0"]);
+    assert!(summary.contains("claimable now: 500 of 1000 (to a public account)"));
+    assert!(summary.contains("estimated fee: 0 (local ledger: no fees)"));
+    let private = f.ok(500, &["summary", "0", "--to-private", C]);
+    assert!(private.contains("(to a private account)"));
 
     assert!(f.ok(500, &["claim", "0"]).contains("claimed 500"));
     assert!(f.ok(1_000, &["claim", "0"]).contains("claimed 500"));

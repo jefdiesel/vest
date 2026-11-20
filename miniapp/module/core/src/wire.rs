@@ -1,33 +1,21 @@
 //! JSON <-> core/SDK types for the module's C ABI.
 //!
-//! Amounts are decimal strings (u128 cannot be a JSON number), account IDs and the token ID
-//! are 32-byte hex strings (optionally prefixed with `Public/` or `Private/`), and times are
-//! JSON numbers. This is the same shape the mini-app's Qt wrapper will use.
+//! Amounts are decimal strings (u128 cannot be a JSON number), account IDs and the token ID are
+//! 32-byte hex (answers) or hex/base58 (inputs), and times are JSON numbers (milliseconds).
 
 use crate::display;
 use serde_json::{json, Value};
 use vesting_core::{AccountId, Amount, CreateParams, Schedule, ScheduleKind, Timestamp};
 use vesting_sdk::ScheduleId;
 
-/// Parse a 32-byte account ID, or a token ID, from a hex string.
+/// Parse a 32-byte account ID, or a token ID: 64 hex characters, or base58 with or without a
+/// `Public/` / `Private/` prefix. (Names are resolved before this, in `Module::resolve_fields`.)
 pub fn account(value: Option<&Value>, field: &str) -> Result<AccountId, String> {
     let text = value
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("{field} must be a 32-byte hex string"))?;
-    let bare = text
-        .strip_prefix("Public/")
-        .or_else(|| text.strip_prefix("Private/"))
-        .unwrap_or(text);
-    let bytes = hex::decode(bare).map_err(|e| format!("{field}: {e}"))?;
-    if bytes.len() != 32 {
-        return Err(format!(
-            "{field} must be 32 bytes (64 hex chars), got {}",
-            bytes.len()
-        ));
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
-    Ok(out)
+        .ok_or_else(|| format!("{field} must be an account (64 hex or base58)"))?;
+    vesting_sdk::names::parse_address(text)
+        .ok_or_else(|| format!("{field}: '{text}' is not a 32-byte account (64 hex or base58)"))
 }
 
 /// Parse a u128 amount from a decimal string (or a JSON integer).

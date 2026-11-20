@@ -2,7 +2,7 @@
 //!
 //! Amounts stay exact u128 integers on the wire (`"claimable": "94138000"`) and are also
 //! returned formatted with the token's decimals (`"claimable_display": "0.094138 LEZ"`).
-//! The token is LEZ (9 decimals) by default; `vesting_init` may override `decimals`.
+//! The token is LEZ (9 decimals) by default; the `decimals` setting overrides it.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 

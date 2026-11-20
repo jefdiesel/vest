@@ -1,6 +1,7 @@
 #!/bin/bash
 # End to end on a LEZ v0.4.0-rc3 sequencer, through the vesting CLI only (built with --features lez):
-# deploy, native and token schedules, every operation, refusals, a batch, private claims.
+# deploy, native and token schedules, every operation, refusals, a batch, private claims, and the
+# pre-claim summary's simulated fee (public, private native, private token).
 #
 # Environment:
 #   V            the vesting CLI binary
@@ -38,9 +39,14 @@ r() {
   local verdict=PASS; [ "$got" = "$want" ] || { verdict=FAIL; fail=1; }
   { echo "== $name ($verdict: want $want, got $got)"; echo "$out"; } >> "$W/log.txt"
   local tx; tx=$(echo "$out" | grep -oE 'lez: tx [0-9a-f]{64} applied in block [0-9]+' | tail -1 | awk '{print $3, "block", $7}')
-  local line; line=$(echo "$out" | grep -E '^(claimed [0-9]|refunded|created schedule|signalled|error:|schedule .* is now|beneficiary of|program |definition )' | head -2 | tr '\n' ' ')
+  local line; line=$(echo "$out" | grep -E '^(claimed [0-9]|refunded|created schedule|signalled|error:|schedule .* is now|beneficiary of|program |definition |estimated fee|fee check)' | head -2 | tr '\n' ' ')
   echo "$verdict $name ${tx:+tx $tx} :: $line" | tee -a "$RES"
   LAST_OUT=$out
+}
+# fee_ok cmd...: a pre-claim summary with a real simulated fee (> 0) that its payer can pay.
+fee_ok() {
+  local out; out=$("$@" 2>&1); local rc=$?; echo "$out"
+  [ $rc = 0 ] && echo "$out" | grep -qE '^estimated fee: [1-9][0-9]* ' && echo "$out" | grep -q '^fee check: ok'
 }
 wait_claimable() { # id: until the chain says something is claimable
   for _ in $(seq 1 60); do b "${common[@]}" claimable "$1" 2>/dev/null | grep -qE '^claimable now: [1-9]' && return 0; sleep 5; done; return 1; }
@@ -72,7 +78,9 @@ id() { echo "$LAST_OUT" | grep -oE 'created schedule [0-9]+' | head -1 | awk '{p
 echo "== native linear: public claim, private claim into a fresh account"
 NOW=$(nowms)
 r create-linear ok c "${common[@]}" create --creator "$C" --beneficiary "$BH" --token $ZERO --total 500000000 --kind linear --start $((NOW-60000)) --end $((NOW+120000)); L=$(id)
+r summary-public ok fee_ok b "${common[@]}" summary "$L"
 r claim-public ok b "${common[@]}" claim "$L" --yes
+r summary-private-native ok fee_ok b "${common[@]}" summary "$L" --to-private "$P1H"
 r claim-private-native ok ${PROVE:-} "$V" --network "$RPC" --wallet "$WB" "${common[@]}" claim "$L" --to-private "$P1H" --yes
 r balance-P1 ok b "${common[@]}" balance "$P1H"
 
@@ -126,6 +134,7 @@ echo "== token: escrow holding, public claim, private claim into a fresh account
 NOW=$(nowms)
 r create-token ok c "${common[@]}" --sponsor-deposit 30000000 --sponsor-per-claim 12000000 create --creator "$C" --beneficiary "$BH" --token "$DEF" --total 600000000 --kind linear --start $((NOW-60000)) --end $((NOW+600000)); T=$(id)
 r claim-token-public ok b "${common[@]}" claim "$T" --yes
+r summary-token-private ok fee_ok b "${common[@]}" summary "$T" --to-private "$P2H"
 r claim-token-private ok ${PROVE:-} "$V" --network "$RPC" --wallet "$WB" "${common[@]}" claim "$T" --to-private "$P2H" --yes
 r balance-P2 ok b "${common[@]}" balance "$P2H"
 r cancel-token ok c "${common[@]}" cancel "$T" --as-account "$C"

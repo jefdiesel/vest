@@ -1,10 +1,9 @@
 //! The storage/chain boundary shared by the SDK and its consumers.
 //!
-//! A real LEZ backend implements this trait when the program exists. Until
-//! then the CLI supplies a JSON-file implementation and tests supply an
-//! in-memory one.
+//! `LezBackend` (feature `lez`) implements it on the chain; the CLI and the Basecamp module's
+//! tests supply a JSON-file implementation, and the SDK's tests an in-memory one.
 
-use vesting_core::{Event, Schedule, Timestamp};
+use vesting_core::{Amount, Event, Schedule, Timestamp};
 
 /// Backend-local handle for a schedule. The chain backend will map this to a
 /// program account address.
@@ -29,6 +28,34 @@ impl std::fmt::Display for BackendError {
 
 impl std::error::Error for BackendError {}
 
+/// Who pays a transaction's fee.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeePayer {
+    /// The signing caller's public account (every public transaction).
+    Caller,
+    /// The private destination of a private claim: a native claim pays from what it receives,
+    /// a token claim from the native LEZ its schedule's fee float sends with it.
+    ClaimTarget,
+}
+
+/// What a transition would cost on chain, from a simulation that sends nothing (the wallet's
+/// dry run, as `vesting --dry-run` prints it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeeEstimate {
+    /// The fee at the chain's current base fees, in native LEZ (smallest unit).
+    pub fee: Amount,
+    /// What the payer must be able to pay for the transaction to be admitted (at least `fee`;
+    /// the surplus of a public reserve is not charged).
+    pub reserve: Amount,
+    pub payer: FeePayer,
+    /// Native LEZ the payer will have to pay with, when the backend can tell: a public caller's
+    /// balance; for a private claim, the target's balance plus what the claim itself brings
+    /// (the claimed native LEZ, or a token schedule's per-claim float).
+    pub available: Option<Amount>,
+    /// Why the simulated action would revert (a reverted public action still pays its fee).
+    pub revert_reason: Option<String>,
+}
+
 /// Everything the SDK needs from a ledger. Kept deliberately small.
 pub trait Backend {
     /// Current time in milliseconds, or an override for testing.
@@ -48,6 +75,18 @@ pub trait Backend {
     /// The account acting in the next transition (the transaction's signer on LEZ). The client
     /// sets it before every operation; other backends ignore it.
     fn set_caller(&mut self, _caller: [u8; 32]) {}
+
+    /// Simulate the transaction that `submit` would send for `event` (the new `state` of schedule
+    /// `id`, signed by the caller last given to `set_caller`) and report its fee, sending nothing.
+    /// `Ok(None)`: this backend charges no fees (a local ledger).
+    fn estimate_fee(
+        &mut self,
+        _id: ScheduleId,
+        _state: &Schedule,
+        _event: &Event,
+    ) -> Result<Option<FeeEstimate>, BackendError> {
+        Ok(None)
+    }
 
     /// Store and submit several new schedules. LEZ sends them as one transaction (RFP
     /// Functionality 5); the default stores and submits them one by one.

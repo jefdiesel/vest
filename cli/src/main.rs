@@ -1,25 +1,24 @@
-//! CLI for RFP-017 vesting, driving an in-memory (JSON-file) backend.
+//! CLI for RFP-017 vesting: a JSON-file backend for trying the rules, the LEZ chain with
+//! `--network`/`--wallet` (feature `lez`).
 
 mod args;
 mod backend;
 mod batch;
-mod names;
 mod render;
 
 use args::{AccountArg, Cli, Command, KindArg};
 use backend::{Backend, JsonFileBackend, ScheduleId};
 use clap::Parser;
-use logos_rpc::{Client, HttpTransport};
-use names::{NameBook, NameError};
 use std::fs;
 use std::io::{self, Write};
-use std::sync::Arc;
 use vesting_core::{
     cancel, claim, create, create_batch, make_irrevocable, signal_milestone, transfer_beneficiary,
     CreateParams, Event, Schedule, ScheduleKind, VestingError,
 };
+use vesting_sdk::names::{self, NameBook, NameError, RpcClient as Client};
 #[cfg(feature = "lez")]
 use vesting_sdk::LezBackend;
+use vesting_sdk::{AccountRef, PreClaimSummary};
 
 fn main() {
     let cli = Cli::parse();
@@ -83,10 +82,7 @@ impl NamesCtx {
         let (client, lns) = match (&cli.lns, cli.lns_rpc.as_deref().or(cli.network.as_deref())) {
             (Some(arg), Some(url)) => {
                 let id = parse_address(arg.text())?;
-                (
-                    Some(Client::new(Arc::new(HttpTransport::new(url)))),
-                    Some(id),
-                )
+                (Some(names::http_client(url)), Some(id))
             }
             (Some(_), None) => {
                 return Err("--lns needs --lns-rpc <url> or --network <url>".into());
@@ -133,13 +129,24 @@ impl NamesCtx {
 }
 
 fn parse_address(text: &str) -> Result<vesting_core::AccountId, String> {
-    let bytes = hex::decode(text).map_err(|_| format!("bad LNS program address '{}'", text))?;
-    if bytes.len() != 32 {
-        return Err(format!("bad LNS program address '{}'", text));
-    }
-    let mut account = [0u8; 32];
-    account.copy_from_slice(&bytes);
-    Ok(account)
+    names::parse_address(text).ok_or_else(|| format!("bad LNS program address '{}'", text))
+}
+
+/// The pre-claim summary (claimable, simulated fee, fee check) of a claim by `caller`.
+fn summary_of<B: Backend>(
+    backend: &mut B,
+    id: ScheduleId,
+    caller: vesting_core::AccountId,
+    private_target: Option<vesting_core::AccountId>,
+) -> Result<PreClaimSummary, String> {
+    let destination = match private_target {
+        Some(target) => AccountRef::private(target),
+        None => AccountRef::public(caller),
+    };
+    vesting_sdk::pre_claim_summary(backend, id, caller, destination).map_err(|error| match error {
+        vesting_sdk::SdkError::Core(error) => claim_failure(error),
+        other => format!("error: {}", other.message()),
+    })
 }
 
 /// `--network` + `--wallet` select the LEZ backend; the JSON file stays the default.
@@ -419,6 +426,36 @@ fn run<B: Backend>(
             Ok(lines)
         }
 
+        Command::Summary {
+            schedule,
+            to_private,
+            as_account,
+        } => {
+            let state = load(backend, *schedule)?;
+            let caller = match as_account {
+                Some(account) => ctx.resolve(account)?,
+                None => state.beneficiary,
+            };
+            let target = match to_private {
+                Some(account) => Some(ctx.resolve(account)?),
+                None => None,
+            };
+            let summary = summary_of(backend, *schedule, caller, target)?;
+            let mut lines = vec![format!(
+                "claimable now: {} of {} (to a {} account)",
+                summary.claimable,
+                state.total,
+                if target.is_some() {
+                    "private"
+                } else {
+                    "public"
+                }
+            )];
+            lines.extend(render::fee_lines(&summary));
+            lines.push(render::next_unlock_line(&state, now));
+            Ok(lines)
+        }
+
         Command::Claim {
             schedule,
             to_private,
@@ -435,6 +472,20 @@ fn run<B: Backend>(
                     // The LEZ backend asks the wallet whether this account is private; a flag
                     // cannot make an account private. This only names the destination.
                     let target = ctx.resolve(account)?;
+                    // The private path's fee check (RFP Usability 4): simulate the claim first
+                    // and refuse one whose private destination could not pay its fee.
+                    if state.claimable_at(now) > 0 {
+                        let summary = summary_of(backend, *schedule, caller, Some(target))?;
+                        for line in render::fee_lines(&summary) {
+                            println!("{}", line);
+                        }
+                        if summary.fee_covered == Some(false) {
+                            return Err(
+                                "error: the private destination could not pay the claim's fee; nothing was sent"
+                                    .into(),
+                            );
+                        }
+                    }
                     backend.set_claim_target(target);
                     (true, ctx.display(&target))
                 }

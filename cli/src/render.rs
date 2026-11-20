@@ -29,6 +29,41 @@ pub fn human_duration(from: Timestamp, to: Timestamp) -> String {
     format!("{} days", hours / 24)
 }
 
+/// The fee lines of a pre-claim summary (RFP Usability 4).
+pub fn fee_lines(summary: &vesting_sdk::PreClaimSummary) -> Vec<String> {
+    use vesting_sdk::FeePayer;
+    let Some(estimate) = &summary.fee else {
+        return vec![if summary.claimable == 0 {
+            "estimated fee: none (nothing to claim now)".to_string()
+        } else {
+            "estimated fee: 0 (local ledger: no fees)".to_string()
+        }];
+    };
+    let payer = match estimate.payer {
+        FeePayer::Caller => "the claiming public account",
+        FeePayer::ClaimTarget => "the private destination, from what the claim brings it",
+    };
+    let mut lines = vec![format!(
+        "estimated fee: {} native LEZ, paid by {} (reserve {})",
+        estimate.fee, payer, estimate.reserve
+    )];
+    if let Some(have) = estimate.available {
+        lines.push(if have >= estimate.fee {
+            format!("fee check: ok (the payer will have {})", have)
+        } else {
+            format!(
+                "fee check: NOT ENOUGH: the payer will have {}, {} short",
+                have,
+                estimate.fee - have
+            )
+        });
+    }
+    if let Some(reason) = &estimate.revert_reason {
+        lines.push(format!("the simulated claim REVERTS: {}", reason));
+    }
+    lines
+}
+
 /// One line describing the next unlock, using the words from the RFP.
 pub fn next_unlock_line(state: &Schedule, now: Timestamp) -> String {
     if state.cancelled.is_some() {

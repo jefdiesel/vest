@@ -1,0 +1,31 @@
+{
+  "format": "names-network/1",
+  "version": 2,
+  "revision": 1,
+  "name": "Bridge test network (LEZ rc3 demo chain)",
+  "kind": "our-test",
+  "lez": "0.4",
+  "lez_release": { "tag": "v0.4.0-rc3", "commit": "bafd07be", "risc0": "3.0.5", "wire": "rc3" },
+  "chain_id": "2da7f7dfb6e51a28c942ea80391aa518253ec515e98d28cb4d83cc9e16ff5374",
+  "rpc": "https://lez.nameswallet.app/",
+  "registry": "6Yxj5k8AiuBSuMAYVQFGrYKjJGUSSaWWgoB9D9XXN3gA",
+  "programs": {
+    "lns_registry": {
+      "id": "6Yxj5k8AiuBSuMAYVQFGrYKjJGUSSaWWgoB9D9XXN3gA",
+      "image_id": "00ad457122dbd1c88b62d45a6aee5bd38167cc331d562459e1c8885bc76dd2dd",
+      "label": "LNS names registry"
+    },
+    "vesting": {
+      "id": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2",
+      "image_id": "2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6",
+      "label": "Vest (RFP-017), updatable",
+      "source": "github.com/jefdiesel/vest"
+    },
+    "token": {
+      "id": "FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz",
+      "image_id": "223b3cef442ed5b2a2b2193f3ee12c0c6ebe42a77be4dabca39ecc7b27b1c146",
+      "label": "0.4 token program (lez-programs cad71fc), deployed for Vest"
+    }
+  },
+  "updated": "2026-11-20"
+}

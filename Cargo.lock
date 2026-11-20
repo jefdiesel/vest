@@ -10224,15 +10224,10 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vesting-cli"
 version = "0.1.0"
 dependencies = [
- "aes-gcm",
  "borsh",
- "bs58",
  "chrono",
  "clap",
  "hex",
- "logos-accounts",
- "logos-lns",
- "logos-rpc",
  "serde",
  "serde_json",
  "tempfile",
@@ -10274,6 +10269,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vesting-module-core"
+version = "0.2.0"
+dependencies = [
+ "borsh",
+ "bs58",
+ "hex",
+ "serde",
+ "serde_json",
+ "vesting-core",
+ "vesting-sdk",
+]
+
+[[package]]
 name = "vesting-program"
 version = "0.1.0"
 dependencies = [
@@ -10288,13 +10296,18 @@ dependencies = [
 name = "vesting-sdk"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "borsh",
+ "bs58",
  "clap",
  "common",
  "hex",
  "lee",
  "lee_core",
+ "logos-accounts",
+ "logos-lns",
+ "logos-rpc",
  "risc0-binfmt",
  "risc0-circuit-keccak",
  "risc0-circuit-recursion",

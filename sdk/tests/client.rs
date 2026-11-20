@@ -10,6 +10,12 @@ struct MemoryBackend {
     next_id: ScheduleId,
     schedules: BTreeMap<ScheduleId, Schedule>,
     events: Vec<Event>,
+    /// What `estimate_fee` answers (`None`: no fees, like a local ledger).
+    fee: Option<FeeEstimate>,
+    /// What the last `estimate_fee` was asked to simulate.
+    estimated: Vec<(ScheduleId, Event, Option<[u8; 32]>)>,
+    caller: Option<[u8; 32]>,
+    target: Option<[u8; 32]>,
 }
 
 impl MemoryBackend {
@@ -50,6 +56,21 @@ impl Backend for MemoryBackend {
         self.events.push(event.clone());
         Ok(())
     }
+    fn set_caller(&mut self, caller: [u8; 32]) {
+        self.caller = Some(caller);
+    }
+    fn set_claim_target(&mut self, target: [u8; 32]) {
+        self.target = Some(target);
+    }
+    fn estimate_fee(
+        &mut self,
+        id: ScheduleId,
+        _state: &Schedule,
+        event: &Event,
+    ) -> Result<Option<FeeEstimate>, BackendError> {
+        self.estimated.push((id, event.clone(), self.target.take()));
+        Ok(self.fee.clone())
+    }
 }
 
 const A: AccountId = [1u8; 32];
@@ -69,9 +90,14 @@ fn full_linear_lifecycle_through_sdk() {
     assert!(matches!(event, Event::Created { at: 500, .. }));
 
     assert_eq!(client.claimable(id).unwrap(), 500);
-    let summary = client.pre_claim_summary(id, AccountKind::Public).unwrap();
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::public(B))
+        .unwrap();
     assert_eq!(summary.claimable, 500);
-    assert_eq!(summary.estimated_fee, ESTIMATED_FEE_PLACEHOLDER);
+    // A local ledger charges no fee: the estimate is 0 and there is nothing to check.
+    assert_eq!(summary.estimated_fee, 0);
+    assert_eq!(summary.fee, None);
+    assert_eq!(summary.fee_covered, None);
     assert_eq!(summary.destination_kind, AccountKind::Public);
     assert!(summary.next_unlock.is_some());
 
@@ -108,7 +134,9 @@ fn claim_private_refuses_a_public_target() {
     let mut client = Client::new(MemoryBackend::new(500));
     let (id, _, _) = client.create(linear_params(1_000, 0, 1_000)).unwrap();
 
-    let summary = client.pre_claim_summary(id, AccountKind::Private).unwrap();
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::private(C))
+        .unwrap();
     assert_eq!(summary.destination_kind, AccountKind::Private);
 
     let error = client
@@ -150,9 +178,13 @@ fn milestone_lifecycle_through_sdk() {
             reason: WaitingFor::Milestone,
         })
     );
-    let summary = client.pre_claim_summary(id, AccountKind::Public).unwrap();
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::public(B))
+        .unwrap();
     assert_eq!(summary.claimable, 0);
     assert_eq!(summary.next_unlock, None);
+    // Nothing claimable: nothing to simulate.
+    assert!(client.backend().estimated.is_empty());
 
     let (_, amount, _) = client.signal_milestone(id, A, 0).unwrap();
     assert_eq!(amount, 40);
@@ -184,4 +216,75 @@ fn batch_create_irrevocable_and_transfer_through_sdk() {
     assert!(matches!(event, Event::BeneficiaryTransferred { new, .. } if new == C));
     assert_eq!(client.claim_public(1, B).unwrap_err().code(), 10);
     assert_eq!(client.claim_public(1, C).unwrap().1, 10);
+}
+
+fn chain_fee(fee: Amount, available: Option<Amount>, payer: FeePayer) -> FeeEstimate {
+    FeeEstimate {
+        fee,
+        reserve: fee * 2,
+        payer,
+        available,
+        revert_reason: None,
+    }
+}
+
+#[test]
+fn the_summary_carries_the_simulated_fee_and_sends_nothing() {
+    let mut backend = MemoryBackend::new(500);
+    backend.fee = Some(chain_fee(1_234, Some(10_000), FeePayer::Caller));
+    let mut client = Client::new(backend);
+    let (id, _, _) = client.create(linear_params(1_000, 0, 1_000)).unwrap();
+
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::public(B))
+        .unwrap();
+    assert_eq!(summary.claimable, 500);
+    assert_eq!(summary.estimated_fee, 1_234);
+    assert_eq!(summary.fee_covered, Some(true));
+    assert_eq!(summary.fee.as_ref().unwrap().payer, FeePayer::Caller);
+    // The very claim was simulated: schedule 0, by B, for the 500 vested now, to a public account.
+    let (sim_id, event, target) = client.backend().estimated[0].clone();
+    assert_eq!(sim_id, id);
+    assert_eq!(target, None);
+    assert!(matches!(
+        event,
+        Event::Claimed {
+            amount: 500,
+            to_private: false,
+            ..
+        }
+    ));
+    // Nothing was stored or submitted.
+    assert_eq!(client.backend().events.len(), 1);
+    assert_eq!(client.claimable(id).unwrap(), 500);
+}
+
+#[test]
+fn a_private_summary_simulates_the_private_claim_and_checks_the_payer() {
+    let mut backend = MemoryBackend::new(500);
+    // The private target would hold less than the fee: the check says so before any claim.
+    backend.fee = Some(chain_fee(900, Some(899), FeePayer::ClaimTarget));
+    let mut client = Client::new(backend);
+    let (id, _, _) = client.create(linear_params(1_000, 0, 1_000)).unwrap();
+
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::private(C))
+        .unwrap();
+    assert_eq!(summary.estimated_fee, 900);
+    assert_eq!(summary.fee_covered, Some(false));
+    let (_, event, target) = client.backend().estimated[0].clone();
+    assert_eq!(target, Some(C));
+    assert!(matches!(
+        event,
+        Event::Claimed {
+            to_private: true,
+            ..
+        }
+    ));
+
+    // A caller who may not claim gets the claim's own error, not a fee.
+    let error = client
+        .pre_claim_summary(id, C, AccountRef::public(C))
+        .unwrap_err();
+    assert_eq!(error.code(), 10);
 }

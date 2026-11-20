@@ -17,7 +17,7 @@ pub use vesting_program as program;
 
 #[cfg(feature = "lez")]
 mod backend_impl {
-    use crate::{Backend, BackendError, ScheduleId};
+    use crate::{Backend, BackendError, FeeEstimate, FeePayer, ScheduleId};
     use lee::privacy_preserving_transaction::circuit::ProgramCatalog;
     use lee::program::Program;
     use lee_core::account::{AccountId, Actor};
@@ -33,7 +33,8 @@ mod backend_impl {
         config::{SequencerConnectionData, WalletConfigOverrides},
         program_facades::program_loader::ProgramLoader,
         utils::read_password,
-        AccountIdentity, AccountMention, AsyncDelivery, ExecutionFailureKind, WalletCore,
+        AccountIdentity, AccountMention, AsyncDelivery, DryRunReport, ExecutionFailureKind,
+        WalletCore,
     };
 
     #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -55,6 +56,12 @@ mod backend_impl {
         pub timestamp: u64,
     }
 
+    /// A send's outcome: included on chain, or (dry run) the wallet's simulation report.
+    enum Sent {
+        Applied(LastTx),
+        DryRun(Box<DryRunReport>),
+    }
+
     pub struct LezBackend {
         runtime: tokio::runtime::Runtime,
         wallet_config: PathBuf,
@@ -71,6 +78,8 @@ mod backend_impl {
         claim_target: Option<AccountId>,
         caller: Option<[u8; 32]>,
         dry_run: bool,
+        /// The report of the last dry-run send.
+        dry_report: Option<Box<DryRunReport>>,
         gas_limit: Option<u64>,
         last: Option<LastTx>,
     }
@@ -82,6 +91,20 @@ mod backend_impl {
             program: [u8; 32],
             clock_elf: Option<PathBuf>,
             map_path: &Path,
+        ) -> Result<Self, BackendError> {
+            Self::open_with_password(sequencer, wallet_dir, program, clock_elf, map_path, None)
+        }
+
+        /// As [`LezBackend::open`], with the wallet's password given (an app has no terminal to
+        /// prompt on). With `None`, an encrypted wallet needs the LEZ wallet's password variable,
+        /// and is refused otherwise instead of prompting.
+        pub fn open_with_password(
+            sequencer: &str,
+            wallet_dir: &Path,
+            program: [u8; 32],
+            clock_elf: Option<PathBuf>,
+            map_path: &Path,
+            password: Option<String>,
         ) -> Result<Self, BackendError> {
             let sequencer = url::Url::parse(sequencer)
                 .map_err(|e| BackendError::Io(format!("--network: {e}")))?;
@@ -95,9 +118,27 @@ mod backend_impl {
                     wallet_dir.display()
                 )));
             }
-            let password = read_password(&wallet_storage)
-                .map_err(|e| BackendError::Io(e.to_string()))?
-                .to_string();
+            let password = match password {
+                Some(password) => password,
+                None => {
+                    let encrypted = wallet::storage::Storage::is_encrypted(&wallet_storage)
+                        .map_err(|e| BackendError::Io(e.to_string()))?;
+                    let from_env = std::env::var(wallet::PASSWORD_ENV_VAR)
+                        .map(|p| !p.is_empty())
+                        .unwrap_or(false);
+                    if encrypted
+                        && !from_env
+                        && !std::io::IsTerminal::is_terminal(&std::io::stdin())
+                    {
+                        return Err(BackendError::Io(
+                            "the wallet is encrypted: give its password".into(),
+                        ));
+                    }
+                    read_password(&wallet_storage)
+                        .map_err(|e| BackendError::Io(e.to_string()))?
+                        .to_string()
+                }
+            };
             let mut map: IdMap = match std::fs::read(map_path) {
                 Ok(bytes) => serde_json::from_slice(&bytes)
                     .map_err(|e| BackendError::Decode(e.to_string()))?,
@@ -127,6 +168,7 @@ mod backend_impl {
                 claim_target: None,
                 caller: None,
                 dry_run: false,
+                dry_report: None,
                 gas_limit: None,
                 last: None,
             })
@@ -322,7 +364,7 @@ mod backend_impl {
             message: Vec<u8>,
             programs: Vec<AccountId>,
             fee_payer: Option<AccountId>,
-        ) -> Result<LastTx, BackendError> {
+        ) -> Result<Sent, BackendError> {
             let mut wallet = self.wallet()?;
             let catalog = self.catalog(&wallet, &programs).await?;
             let sent = wallet
@@ -338,9 +380,7 @@ mod backend_impl {
                 )
                 .await;
             let hash = match sent {
-                Err(ExecutionFailureKind::DryRun(report)) => {
-                    return Err(BackendError::Io(format!("dry run:\n{report}")))
-                }
+                Err(ExecutionFailureKind::DryRun(report)) => return Ok(Sent::DryRun(report)),
                 Err(error) => return Err(BackendError::Io(error.to_string())),
                 Ok((hash, _)) => hash,
             };
@@ -384,11 +424,11 @@ mod backend_impl {
                 "lez: tx {hash} applied in block {} (timestamp {})",
                 block.header.block_id, block.header.timestamp
             );
-            Ok(LastTx {
+            Ok(Sent::Applied(LastTx {
                 hash: hash.to_string(),
                 block: block.header.block_id,
                 timestamp: block.header.timestamp,
-            })
+            }))
         }
 
         fn programs_for(&self, asset: Asset) -> Vec<AccountId> {
@@ -501,11 +541,75 @@ mod backend_impl {
             programs: Vec<AccountId>,
             fee_payer: Option<AccountId>,
         ) -> Result<(), BackendError> {
-            let last = self
+            match self
                 .runtime
-                .block_on(self.send(accounts, message, programs, fee_payer))?;
-            self.last = Some(last);
-            Ok(())
+                .block_on(self.send(accounts, message, programs, fee_payer))?
+            {
+                Sent::Applied(last) => {
+                    self.last = Some(last);
+                    Ok(())
+                }
+                // A dry run is not a write: the caller (the CLI's --dry-run) shows the report.
+                Sent::DryRun(report) => {
+                    let text = format!("dry run:\n{report}");
+                    self.dry_report = Some(report);
+                    Err(BackendError::Io(text))
+                }
+            }
+        }
+
+        /// The fee estimate of a dry-run report: who pays, and what they will have to pay with.
+        fn fee_estimate(
+            &self,
+            report: &DryRunReport,
+            id: ScheduleId,
+            event: &Event,
+            target: Option<AccountId>,
+        ) -> Result<FeeEstimate, BackendError> {
+            match report {
+                DryRunReport::Public {
+                    fee,
+                    fee_at_head,
+                    reserve_at_head,
+                    revert_reason,
+                    ..
+                } => Ok(FeeEstimate {
+                    fee: *fee_at_head,
+                    reserve: *reserve_at_head,
+                    payer: FeePayer::Caller,
+                    available: Some(self.balances(fee.payer.into_value(), None)?.0),
+                    revert_reason: revert_reason.clone(),
+                }),
+                DryRunReport::Private {
+                    fee, fee_at_head, ..
+                } => {
+                    let payer = target.unwrap_or(fee.payer);
+                    let held = self.balances(payer.into_value(), None)?.0;
+                    // What the claim brings the payer before its fee is taken: the native LEZ it
+                    // claims, or a token schedule's per-claim draw on the creator's float.
+                    let brings = match event {
+                        Event::Claimed { amount, .. } => {
+                            let address = self.address_of(id)?;
+                            let wallet = self.wallet()?;
+                            let chain = self
+                                .chain_state(&wallet, address)?
+                                .ok_or(BackendError::NotFound(id))?;
+                            match chain.asset {
+                                Asset::Native => *amount,
+                                Asset::Token { .. } => chain.per_claim.min(chain.float),
+                            }
+                        }
+                        _ => 0,
+                    };
+                    Ok(FeeEstimate {
+                        fee: *fee_at_head,
+                        reserve: fee.reserve,
+                        payer: FeePayer::ClaimTarget,
+                        available: Some(held.saturating_add(brings)),
+                        revert_reason: None,
+                    })
+                }
+            }
         }
 
         /// The transaction for a transition of an existing schedule.
@@ -754,6 +858,25 @@ mod backend_impl {
             self.runtime_send(accounts, message, vec![token_program], fee_payer)
         }
 
+        /// The wallet's accounts: `(account, private, native balance)`. Public accounts are the
+        /// ones it can sign for; private ones are those it holds the keys of. A balance that
+        /// cannot be read is reported as 0.
+        pub fn wallet_accounts(&self) -> Result<Vec<([u8; 32], bool, u128)>, BackendError> {
+            let wallet = self.wallet()?;
+            let chain = wallet.storage().key_chain();
+            let public: Vec<AccountId> = chain.public_account_ids().map(|(id, _)| id).collect();
+            let private: Vec<AccountId> = chain.private_account_ids().map(|(id, _)| id).collect();
+            drop(wallet);
+            let mut out = Vec::new();
+            for (ids, is_private) in [(public, false), (private, true)] {
+                for id in ids {
+                    let native = self.balances(id.into_value(), None).map_or(0, |(n, _)| n);
+                    out.push((id.into_value(), is_private, native));
+                }
+            }
+            Ok(out)
+        }
+
         /// Native and token balances of a public account, or of a private account of the wallet.
         pub fn balances(
             &self,
@@ -969,6 +1092,33 @@ mod backend_impl {
             let creates: Vec<(ScheduleId, Schedule)> =
                 items.iter().map(|(id, s, _)| (*id, s.clone())).collect();
             self.send_create(&creates)
+        }
+
+        /// The wallet's dry run of the transaction `submit` would send (the same accounts, the
+        /// same instruction, simulated at the head fee state; nothing is proven or sent).
+        fn estimate_fee(
+            &mut self,
+            id: ScheduleId,
+            state: &Schedule,
+            event: &Event,
+        ) -> Result<Option<FeeEstimate>, BackendError> {
+            let target = self.claim_target;
+            let was = self.dry_run;
+            self.dry_run = true;
+            self.dry_report = None;
+            let sent = match event {
+                Event::Created { .. } => self.send_create(&[(id, state.clone())]),
+                _ => self.send_op(id, state, event),
+            };
+            self.dry_run = was;
+            let report = match (self.dry_report.take(), sent) {
+                (Some(report), _) => report,
+                (None, Err(error)) => return Err(error),
+                (None, Ok(())) => {
+                    return Err(BackendError::Io("the dry run reported nothing".into()))
+                }
+            };
+            self.fee_estimate(&report, id, event, target).map(Some)
         }
     }
 }

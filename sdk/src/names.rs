@@ -1,10 +1,10 @@
-//! LNS names for account arguments.
+//! LNS names for account arguments (feature `names`), shared by the CLI and the Basecamp module.
 //!
-//! An account argument may be a 64-hex address or a logos-names v5 name.
-//! Names are resolved at the moment of the action against `logos-sdk`'s `lns`
-//! module; only the resolved address is stored on chain. A small local book
-//! remembers name → address so `show`, `list` and events can display names
-//! when a reverse lookup exists.
+//! An account argument may be an address (64 hex characters, or base58 with or without a
+//! `Public/` / `Private/` prefix) or a logos-names v5 name. Names are resolved at the moment of
+//! the action through the LNS registry (`logos-sdk`'s `lns` crate, vendored); only the resolved
+//! address is stored on chain. A small local book remembers name → address so `show`, `list` and
+//! events can display names when a reverse lookup exists.
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -39,7 +39,8 @@ impl fmt::Display for NameError {
             NameError::InvalidName { name } => write!(f, "invalid LNS name '{}'", name),
             NameError::LnsNotConfigured { name } => write!(
                 f,
-                "'{}' is a name: pass --lns <program> and --lns-rpc <url> to resolve it",
+                "'{}' is a name, and no LNS registry is set to resolve it (CLI: --lns <program> \
+                 and --lns-rpc <url>; module: the lns_registry setting)",
                 name
             ),
             NameError::UnknownName { name } => write!(f, "unknown LNS name '{}'", name),
@@ -98,6 +99,15 @@ impl NameBook {
     }
 }
 
+/// An LNS RPC client over HTTP(S), for [`resolve`].
+pub fn http_client(url: &str) -> Client {
+    Client::new(std::sync::Arc::new(logos_rpc::HttpTransport::new(url)))
+}
+
+pub use logos_rpc::Client as RpcClient;
+#[doc(hidden)]
+pub use logos_rpc::MockRpc;
+
 pub fn base58(account: &AccountId) -> String {
     bs58::encode(account).into_string()
 }
@@ -106,14 +116,28 @@ fn base58_lee(account: &logos_accounts::AccountId) -> String {
     bs58::encode(account.value()).into_string()
 }
 
-fn parse_address(text: &str) -> Option<AccountId> {
-    let bytes = hex::decode(text).ok()?;
-    if bytes.len() != 32 {
-        return None;
+/// An address written as 64 hex characters, or as base58 (32 bytes) with an optional
+/// `Public/` or `Private/` prefix, as the LEZ wallet and the explorer print them.
+pub fn parse_address(text: &str) -> Option<AccountId> {
+    let text = text.trim();
+    let bare = text
+        .strip_prefix("Public/")
+        .or_else(|| text.strip_prefix("Private/"))
+        .unwrap_or(text);
+    if bare.len() == 64 {
+        if let Ok(bytes) = hex::decode(bare) {
+            return bytes.try_into().ok();
+        }
     }
-    let mut account = [0u8; 32];
-    account.copy_from_slice(&bytes);
-    Some(account)
+    // A base58 account id is 32-44 characters; LNS names are shorter or contain characters
+    // base58 lacks, and a name that happened to decode to exactly 32 bytes would need 32+
+    // characters of base58's alphabet only.
+    if (32..=44).contains(&bare.len()) {
+        if let Ok(bytes) = bs58::decode(bare).into_vec() {
+            return bytes.try_into().ok();
+        }
+    }
+    None
 }
 
 #[derive(BorshDeserialize, borsh::BorshSerialize)]
@@ -210,6 +234,48 @@ fn lee_account(account: &AccountId) -> logos_accounts::AccountId {
     logos_accounts::AccountId::new(*account)
 }
 
+/// Test support for crates that resolve names (the module's tests): the RPC answer a v5 LNS
+/// registry gives for `name` held by `account` until `expires` (ms; `u64::MAX`: never), for a
+/// `logos_rpc::MockRpc` queued with `push_ok("getAccountView", ...)`.
+#[doc(hidden)]
+pub fn mock_record_answer(
+    lns: &AccountId,
+    name: &str,
+    account: &AccountId,
+    expires: u64,
+) -> serde_json::Value {
+    let derived = derive(name);
+    let wire = ProfileWire {
+        name: name.to_string(),
+        account: Some(*account),
+        npk: None,
+        vpk: Vec::new(),
+        texts: Vec::new(),
+    };
+    let mut plain = borsh::to_vec(&wire).expect("borsh");
+    while plain.len() % 256 != 0 {
+        plain.push(0);
+    }
+    let nonce = [0u8; NONCE_LEN];
+    let sealed = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived.key))
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &plain,
+                aad: RECORD_SEAL,
+            },
+        )
+        .expect("seal");
+    let mut bytes = vec![7u8];
+    bytes.extend_from_slice(&[1u8; 32]);
+    bytes.extend_from_slice(&expires.to_le_bytes());
+    bytes.extend_from_slice(&((nonce.len() + sealed.len()) as u32).to_le_bytes());
+    bytes.extend_from_slice(&nonce);
+    bytes.extend_from_slice(&sealed);
+    bytes.extend_from_slice(&[0, 0]); // not claimed, no deed
+    serde_json::json!({ "data": { "actor_states": { base58(lns): bytes } } })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +326,18 @@ mod tests {
         );
         // Keep the Arc alive only through the Client.
         Client::new(rpc)
+    }
+
+    #[test]
+    fn addresses_parse_as_hex_and_base58() {
+        let account = [7u8; 32];
+        let b58 = base58(&account);
+        assert_eq!(parse_address(&hex::encode(account)), Some(account));
+        assert_eq!(parse_address(&b58), Some(account));
+        assert_eq!(parse_address(&format!("Public/{b58}")), Some(account));
+        assert_eq!(parse_address(&format!("Private/{b58}")), Some(account));
+        assert_eq!(parse_address("alice"), None);
+        assert_eq!(parse_address("0707"), None);
     }
 
     #[test]

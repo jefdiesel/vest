@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "sdk", "cli", "program", "methods", "methods/vesting_guest", "methods/token_guest", "e2e", "idl-check"]
+members = ["core", "sdk", "cli", "program", "methods", "methods/vesting_guest", "methods/token_guest", "e2e", "idl-check", "miniapp/module/core"]
 
 [workspace.package]
 edition = "2021"
