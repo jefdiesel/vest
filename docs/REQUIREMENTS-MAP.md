@@ -84,7 +84,7 @@ run 0.4 yet. Where the RFP says testnet, the public demo chain is the closest av
   idl-check 4, vendored logos-sdk crates 17).
 - Mini-app module: `cargo test --manifest-path miniapp/module/rust-lib/Cargo.toml` 10 passed.
 - `node --test`: viewer 9, mini-app 63, reference faucet mini-app 1 — all pass.
-- `e2e/tests/chain.rs` (in-process rc3 sequencer, dev-mode): passes, every step of `scripts/e2e.sh`.
+- `e2e/tests/chain.rs` (in-process rc3 sequencer, dev-mode): passes; `scripts/e2e.sh` 40 steps, 40 PASS (`docs/live/e2e-inprocess-20261120.txt`).
 
 ## Known limits
 
