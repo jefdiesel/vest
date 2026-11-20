@@ -34,8 +34,8 @@ LIST = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
              {"beneficiary": False, "creator": True, "cancel_authority": True, "milestone_authority": True},
              beneficiary=OTHER, signalled=[True, False]),
 ]}
-SETTINGS = {"ok": True, "connected": True, "status": "ready", "chain": True, "has_password": False, "data_dir": "/Users/you/Library/Application Support/Logos/vesting",
-            "settings": {"wallet_dir": "/Users/you/lez-wallet", "network_file": "", "rpc": "", "chain_id": "", "program": "", "token_program": "", "lns_registry": "", "clock_elf": ""},
+SETTINGS = {"ok": True, "connected": True, "status": "ready", "chain": True, "has_password": False, "data_dir": "~/Library/Application Support/Logos/vesting",
+            "settings": {"wallet_dir": "~/lez-wallet", "network_file": "", "rpc": "", "chain_id": "", "program": "", "token_program": "", "lns_registry": "", "clock_elf": ""},
             "network": {"name": "Bridge test network (LEZ rc3 demo chain)", "source": "built-in", "rpc": "https://lez.nameswallet.app/",
                         "chain_id": "2da7f7dfb6e51a28c942ea80391aa518253ec515e98d28cb4d83cc9e16ff5374",
                         "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "token_program": "FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz",
