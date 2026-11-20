@@ -59,6 +59,10 @@ miniapp/module/stage.sh /tmp/vest-stage
 builder compiles only `rust-lib/`); `module/rust-lib/Cargo.lock` is the workspace's lock plus the
 module's own two crates. Loading and clicking through: [`docs/BASECAMP-TEST.md`](../docs/BASECAMP-TEST.md).
 
+`tools/loadcheck.py <plugin.dylib> <Basecamp Frameworks dir>` checks a built module plugin
+loads: it lists every undefined symbol nothing provides (the plugin links with
+`-undefined dynamic_lookup`, so a missing library only shows at load) and dlopens it.
+
 `tools/render.py` renders `qml/Main.qml` offscreen with a stand-in module (8 scenarios: positions,
 public and private confirmations, a fee the private account can't pay, creator, settings, not
 connected, module missing) and fails on any QML error.
