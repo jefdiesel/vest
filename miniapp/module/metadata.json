@@ -20,7 +20,7 @@
       "runtime": []
     },
     "external_libraries": [],
-    "rust": { "toolchain": "1.98.1" },
+    "rust": { "toolchain": "1.94.1" },
     "cmake": {
       "find_packages": [],
       "extra_sources": [],
