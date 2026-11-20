@@ -24,6 +24,16 @@
         unset DEVELOPER_DIR SDKROOT
         exec /usr/bin/xcrun "$@"
       '';
+      # rapidsnark's build script reads a file outside its crate, which the vendored copy lacks:
+      # its prebuilt static archives (the release its pinned version names) come from here.
+      rapidsnark = pkgs.runCommand "rapidsnark-macOS-arm64-v0.0.8" { nativeBuildInputs = [ pkgs.unzip ]; } ''
+        unzip -q ${pkgs.fetchurl {
+          url = "https://github.com/iden3/rapidsnark/releases/download/v0.0.8/rapidsnark-macOS-arm64-v0.0.8.zip";
+          sha256 = "dbd2c1498663223232f9c3ad02259d2839e62e784e9b1f6a0e9bd5070443990d";
+        }}
+        mkdir -p $out
+        cp rapidsnark-macOS-arm64-v0.0.8/lib/*.a $out/
+      '';
     in
     logos-module-builder.lib.mkLogosModule {
       src = ./.;
@@ -31,6 +41,9 @@
       flakeInputs = inputs;
       rustExtraNativeBuildInputs = [ systemXcrun ];
       # risc0's kernel build keeps a cache under $HOME, which a nix build has read-only.
-      rustEnv = { HOME = "/private/tmp/vest-module-build-home"; };
+      rustEnv = {
+        HOME = "/private/tmp/vest-module-build-home";
+        RAPIDSNARK_LIB_DIR = "${rapidsnark}";
+      };
     };
 }

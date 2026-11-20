@@ -23,3 +23,6 @@ crate-type = ["staticlib"]
 vesting-module-core = { path = "vest/miniapp/module/core", features = ["lez"] }
 serde_json = "1"
 logos-rust-sdk = { path = "../logos-rust-sdk-src" }
+# rapidsnark (pulled in by the LEZ wallet) linked statically, so the plugin needs no extra dylib;
+# the flake hands its prebuilt archives in through RAPIDSNARK_LIB_DIR.
+rust-rapidsnark = { git = "https://github.com/logos-blockchain/logos-blockchain-rust-rapidsnark.git", rev = "e91187f8ccb5bbfc7bb00dac88169112428da78f", features = ["static-rapidsnark"] }

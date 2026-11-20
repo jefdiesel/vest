@@ -9438,6 +9438,7 @@ name = "vesting_module"
 version = "0.2.0"
 dependencies = [
  "logos-rust-sdk",
+ "rust-rapidsnark",
  "serde_json",
  "vesting-module-core",
 ]
