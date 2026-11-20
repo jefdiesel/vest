@@ -448,7 +448,7 @@ impl Module {
                 .list()
                 .into_iter()
                 .map(|(id, state)| {
-                    let address = client.backend().address(id);
+                    let address = client.backend().schedule_address(id);
                     (id, state, address)
                 })
                 .collect();
@@ -708,7 +708,7 @@ impl Module {
     pub fn import_schedule(&mut self, account: &str) -> String {
         answer(|| {
             let (account, _) = self.resolve(account.trim())?;
-            let id = self.client()?.backend_mut().import(account)?;
+            let id = self.client()?.backend_mut().import_account(account)?;
             Ok(ok(json!({ "id": id })))
         })
     }

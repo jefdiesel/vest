@@ -23,9 +23,9 @@ pub trait ModuleBackend: Backend {
     /// The wallet's accounts (signing public accounts and held private accounts).
     fn accounts(&self) -> Result<Vec<WalletAccount>, String>;
     /// Give an existing on-chain schedule account a local id.
-    fn import(&mut self, account: AccountId) -> Result<ScheduleId, String>;
+    fn import_account(&mut self, account: AccountId) -> Result<ScheduleId, String>;
     /// The on-chain account of a schedule id, when there is one.
-    fn address(&self, id: ScheduleId) -> Option<AccountId>;
+    fn schedule_address(&self, id: ScheduleId) -> Option<AccountId>;
 }
 
 #[cfg(feature = "lez")]
@@ -43,7 +43,7 @@ impl ModuleBackend for vesting_sdk::LezBackend {
             .collect())
     }
 
-    fn import(&mut self, account: AccountId) -> Result<ScheduleId, String> {
+    fn import_account(&mut self, account: AccountId) -> Result<ScheduleId, String> {
         // Refuse an account that holds no schedule of this program before it gets an id.
         let id = vesting_sdk::LezBackend::import(self, account).map_err(|e| e.to_string())?;
         if let Err(error) = self.load(id) {
@@ -55,7 +55,7 @@ impl ModuleBackend for vesting_sdk::LezBackend {
         Ok(id)
     }
 
-    fn address(&self, id: ScheduleId) -> Option<AccountId> {
+    fn schedule_address(&self, id: ScheduleId) -> Option<AccountId> {
         vesting_sdk::LezBackend::address(self, id).ok()
     }
 }
@@ -176,11 +176,11 @@ mod json {
             Ok(self.accounts.clone())
         }
 
-        fn import(&mut self, _account: AccountId) -> Result<ScheduleId, String> {
+        fn import_account(&mut self, _account: AccountId) -> Result<ScheduleId, String> {
             Err("importing a schedule account needs the chain (the lez feature)".into())
         }
 
-        fn address(&self, _id: ScheduleId) -> Option<AccountId> {
+        fn schedule_address(&self, _id: ScheduleId) -> Option<AccountId> {
             None
         }
     }
