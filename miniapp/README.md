@@ -41,7 +41,7 @@ unless it is local (`127.0.0.1`).
 ## Build and test
 
 ```sh
-node --test miniapp/logic.test.mjs                 # the view's logic (105 tests)
+node --test miniapp/logic.test.mjs                 # the view's logic (111 tests)
 cargo test -p vesting-module-core                  # every module call on the JSON test ledger (13 tests)
 cargo build -p vesting-module-core --features lez  # the chain build of the module's core
 ```

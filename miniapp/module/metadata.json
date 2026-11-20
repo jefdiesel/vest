@@ -1,7 +1,7 @@
 {
   "name": "vesting",
   "display_name": "Vesting",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "core",
   "interface": "cdylib",
   "category": "finance",

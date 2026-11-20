@@ -548,10 +548,40 @@ export function firstRun(info) {
     return !!info && !info.connected && !String((info.settings || {}).wallet_dir || "").trim()
 }
 
-/// A finished schedule has nothing left to cancel, claim or signal.
+/// Fully claimed: everything was paid to the beneficiary.
+export function isFullyClaimed(s) {
+    s = s || {}
+    return String(s.total || "") !== "" && norm(s.claimed) === norm(s.total)
+}
+
+/// Nothing changes any more: cancelled or fully claimed. (A cancelled schedule may still hold
+/// what had vested by the cancel: the program keeps that claimable by the beneficiary.)
+export function isClosed(s) {
+    s = s || {}
+    return !!s.cancelled || isFullyClaimed(s)
+}
+
+/// Nothing left to do for anyone: closed, and nothing claimable.
 export function isFinished(s) {
     s = s || {}
-    return !!s.cancelled || (String(s.total) !== "" && norm(s.claimed) === norm(s.total))
+    return isClosed(s) && !above(s.claimable || "0", "0")
+}
+
+/// The words for a closed schedule: its status line, and the list row's right side.
+export function statusLine(s) {
+    s = s || {}
+    if (s.cancelled)
+        return "Cancelled" + (s.cancelled_at ? " on " + dateText(s.cancelled_at) : "") + ". "
+            + (s.refund_display || "The unvested amount") + " went back to the creator."
+    if (isFullyClaimed(s)) return "Fully claimed."
+    return ""
+}
+
+export function rowState(s) {
+    s = s || {}
+    if (s.cancelled) return above(s.claimable || "0", "0") ? "Cancelled · " + s.claimable_display + " to claim" : "Cancelled"
+    if (isFullyClaimed(s)) return "Fully claimed"
+    return (s.claimable_display || "0 LEZ") + " to claim"
 }
 
 /// The confirm sheet's words for a step that can't be undone.

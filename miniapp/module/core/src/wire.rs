@@ -139,6 +139,12 @@ pub fn schedule_json(id: ScheduleId, s: &Schedule, now: Timestamp) -> Value {
         "cancel_authority": hex::encode(s.cancel_authority),
         "milestone_authority": hex::encode(s.milestone_authority),
         "cancelled": s.cancelled.is_some(),
+        // After a cancel: when, what had vested then (still the beneficiary's to claim) and
+        // what went back to the creator.
+        "cancelled_at": s.cancelled.as_ref().map(|c| c.at),
+        "vested_at_cancel": s.cancelled.as_ref().map(|c| c.vested_at_cancel.to_string()),
+        "refund": s.cancelled.as_ref().map(|c| s.total.saturating_sub(c.vested_at_cancel).to_string()),
+        "refund_display": s.cancelled.as_ref().map(|c| display::amount(s.total.saturating_sub(c.vested_at_cancel))),
         "last_time": s.last_time,
         "version": s.version,
     })

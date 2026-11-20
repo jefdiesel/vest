@@ -256,6 +256,16 @@ fn batch_signal_cancel_irrevocable_transfer() {
     assert_eq!(again["code"], 18);
     let cancel = parse(module.cancel(2));
     assert_eq!(cancel["refund"], "60");
+    // The list says when it was cancelled, what went back and what had vested (still claimable).
+    let cancelled = &parse(module.list())["schedules"][2];
+    assert_eq!(cancelled["cancelled"], true);
+    assert_eq!(cancelled["cancelled_at"], 500);
+    assert_eq!(cancelled["vested_at_cancel"], "40");
+    assert_eq!(cancelled["refund"], "60");
+    assert_eq!(cancelled["claimable"], "40");
+    let live = &parse(module.list())["schedules"][0];
+    assert_eq!(live["cancelled_at"], Value::Null);
+    assert_eq!(live["refund"], Value::Null);
     assert_eq!(parse(module.make_irrevocable(2))["ok"], false);
     let transfer = parse(module.transfer_beneficiary(2, &hex_id(4)));
     assert_eq!(transfer["ok"], true);

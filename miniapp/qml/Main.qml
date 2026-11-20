@@ -415,7 +415,7 @@ Item {
                         required property var modelData
                         Layout.fillWidth: true
                         label: Logic.scheduleTitle(modelData)
-                        detail: Logic.isFinished(modelData) ? "finished" : modelData.claimable_display + " to claim"
+                        detail: Logic.rowState(modelData)
                         chosen: String(root.recipientId) === String(modelData.id)
                         onPressed: { root.recipientId = modelData.id; root.confirm = null }
                     }
@@ -425,10 +425,15 @@ Item {
             Card {
                 visible: root.tab === "recipient" && root.selected !== null
                 Heading { text: root.selected ? "Schedule " + root.selected.id : "" }
-                FactRow { look: root.look; key: "Claimable now"; value: root.selected ? root.selected.claimable_display : ""; tone: look.good }
-                FactRow { look: root.look; key: "Claimed"; value: root.selected ? root.selected.claimed_display + " of " + root.selected.total_display : "" }
-                FactRow { look: root.look; key: "Still locked"; value: root.selected ? root.selected.locked_display : "" }
-                FactRow { look: root.look; key: "Next"; value: root.selected ? Logic.nextUnlock(root.selected, root.viewTime()).text : "" }
+                Body { visible: !!root.selected && Logic.isClosed(root.selected); text: root.selected ? Logic.statusLine(root.selected) : ""; color: look.ink }
+                FactRow {
+                    look: root.look; key: "Claimable now"
+                    visible: !!root.selected && (!Logic.isClosed(root.selected) || Logic.above(root.selected.claimable || "0", "0"))
+                    value: root.selected ? root.selected.claimable_display + (root.selected.cancelled ? " (vested before the cancel)" : "") : ""
+                }
+                FactRow { look: root.look; key: "Claimed"; value: root.selected ? root.selected.claimed_display + (root.selected.cancelled ? "" : " of " + root.selected.total_display) : "" }
+                FactRow { look: root.look; key: "Still locked"; visible: !!root.selected && !Logic.isClosed(root.selected); value: root.selected ? root.selected.locked_display : "" }
+                FactRow { look: root.look; key: "Next"; visible: !!root.selected && !Logic.isClosed(root.selected); value: root.selected ? Logic.nextUnlock(root.selected, root.viewTime()).text : "" }
                 FactRow { look: root.look; key: "From"; value: root.selected ? Logic.labelled(root.selected.creator, root.names) : "" }
                 RowLayout {
                     visible: !!(root.selected && root.selected.address)
@@ -491,7 +496,7 @@ Item {
             }
 
             Card {
-                visible: root.tab === "recipient" && root.selected !== null && root.selected.transferable && !Logic.isFinished(root.selected)
+                visible: root.tab === "recipient" && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
                 Heading { text: "Hand this schedule to someone else" }
                 Body { text: "This schedule was made transferable: what is still to vest can go to another account." }
                 Field { id: transferField; look: root.look; Layout.fillWidth: true; hint: "New beneficiary: address or LNS name" }
@@ -693,10 +698,10 @@ Item {
                         }
                         Body {
                             text: "To " + Logic.labelled(managed.modelData.beneficiary, root.names) + " · claimed " + managed.modelData.claimed_display
-                                + (managed.modelData.cancelled ? " · cancelled" : Logic.isFinished(managed.modelData) ? " · finished" : managed.modelData.cancelable ? "" : " · irrevocable")
+                                + (managed.modelData.cancelled ? " · cancelled" : Logic.isFullyClaimed(managed.modelData) ? " · fully claimed" : managed.modelData.cancelable ? "" : " · irrevocable")
                         }
                         Flow {
-                            visible: !Logic.isFinished(managed.modelData)
+                            visible: !Logic.isClosed(managed.modelData)
                             Layout.fillWidth: true
                             spacing: 8
                             Action {
@@ -741,7 +746,7 @@ Item {
                     text: root.connectProblem
                     color: look.alarm
                 }
-                Body { visible: root.connected; text: "Connected."; color: look.good }
+                Body { visible: root.connected; text: "Connected."; color: look.ink }
                 Action {
                     look: root.look; strong: true; changes: true; busy: root.busy
                     label: "Save and connect"; busyLabel: "Connecting…"; working: root.workingOn === "settings"
@@ -783,7 +788,7 @@ Item {
                 visible: root.resultLine !== ""
                 Layout.fillWidth: true
                 text: root.resultLine
-                color: root.resultBad ? look.alarm : look.good
+                color: root.resultBad ? look.alarm : look.ink
                 font.family: look.sans
                 font.pixelSize: look.px(16)
                 font.weight: Font.Medium

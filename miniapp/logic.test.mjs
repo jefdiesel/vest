@@ -159,7 +159,16 @@ check("a saved wallet not opened yet is not an error either", L.connectProblem({
 check("a wrong folder says so plainly", L.connectProblem({ connected: false, status: "no wallet at /w", settings: { wallet_dir: "/w" } }), "No wallet found in that folder. Choose the folder that holds wallet_config.json and storage.json.");
 check("an encrypted wallet, another chain", [/password/.test(L.connectProblem({ connected: false, status: "the wallet is encrypted: give its password", settings: { wallet_dir: "/w" } })), /different network/.test(L.connectProblem({ connected: false, status: "https://x serves chain ab, not cd", settings: { wallet_dir: "/w" } }))], [true, true]);
 check("connected: no problem, no first run", [L.connectProblem({ connected: true }), L.firstRun({ connected: true, settings: {} })], ["", false]);
-check("isFinished", [L.isFinished({ total: "10", claimed: "10" }), L.isFinished({ total: "10", claimed: "3" }), L.isFinished({ total: "10", claimed: "3", cancelled: true })], [true, false, true]);
+check("isFinished", [L.isFinished({ total: "10", claimed: "10", claimable: "0" }), L.isFinished({ total: "10", claimed: "3", claimable: "1" }), L.isFinished({ total: "10", claimed: "3", claimable: "0", cancelled: true })], [true, false, true]);
+// A cancelled schedule: the program keeps what had vested by the cancel claimable (core
+// CancelRecord.vested_at_cancel); nothing is locked and nothing more vests.
+const CANCELLED = { id: 0, total: "1000000", claimed: "652652", claimable: "231", claimable_display: "0.000000231 LEZ", cancelled: true, cancelled_at: Date.UTC(2026, 10, 20, 21, 5), refund: "347117", refund_display: "0.000347117 LEZ" };
+check("cancelled: status line, row, still claimable", [L.statusLine(CANCELLED), L.rowState(CANCELLED), L.isClosed(CANCELLED), L.isFinished(CANCELLED)],
+  ["Cancelled on 2026-11-20. 0.000347117 LEZ went back to the creator.", "Cancelled · 0.000000231 LEZ to claim", true, false]);
+check("cancelled and claimed out", [L.rowState({ ...CANCELLED, claimable: "0" }), L.isFinished({ ...CANCELLED, claimable: "0" })], ["Cancelled", true]);
+const DONE = { id: 1, total: "500", claimed: "500", claimable: "0", claimable_display: "0 LEZ" };
+check("fully claimed: status line and row", [L.statusLine(DONE), L.rowState(DONE), L.isClosed(DONE), L.isFinished(DONE)], ["Fully claimed.", "Fully claimed", true, true]);
+check("a live schedule has no status line", [L.statusLine({ total: "10", claimed: "1", claimable: "2", claimable_display: "2 LEZ" }), L.rowState({ total: "10", claimed: "1", claimable: "2", claimable_display: "2 LEZ" })], ["", "2 LEZ to claim"]);
 check("confirm sheet: cancel", L.confirmText("cancel", { id: 0, locked_display: "0.000347 LEZ" }), "Cancel schedule 0? The unvested 0.000347 LEZ goes back to you. This can't be undone.");
 check("confirm sheet: irrevocable", /can't be undone/.test(L.confirmText("irrevocable", { id: 2 })), true);
 check("scheduleTitle", L.scheduleTitle({ id: 3, kind: "cliff-linear", total_display: "1.5 LEZ" }), "Schedule 3 · cliff, then linear · 1.5 LEZ");
@@ -167,6 +176,8 @@ check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nam
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("no 'hex or base58' wording on the screen", /hex or base58/i.test(qml), false);
+  check("no green for state: state is said in words, in ink", /look\.good|\.success\b|"green"/.test(qml), false);
+  check("a closed schedule hides Still locked and Next", /key: "Still locked"; visible: !!root\.selected && !Logic\.isClosed/.test(qml) && /key: "Next"; visible: !!root\.selected && !Logic\.isClosed/.test(qml), true);
   check("the kit is used, Vest's own copies are gone", [/import "kit"/.test(qml), /component (Action|Field|Link|Toggle|Fact|Panel):/.test(qml)], [true, false]);
 }
 

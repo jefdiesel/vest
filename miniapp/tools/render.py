@@ -60,6 +60,14 @@ def summary(covered, payer, private):
             "revert_reason": None, "next_unlock": NOW + 330 * DAY, "destination_kind": "private" if private else "public"}}
 
 
+CANCELLED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
+    schedule(0, {"type": "linear", "start": NOW - 2 * DAY, "end": NOW + DAY}, "1000000", "652652", "231",
+             {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True},
+             cancelled=True, cancelled_at=NOW - 3600000, vested_at_cancel="652883", refund="347117", refund_display=lez("347117"),
+             locked="347117", locked_display=lez("347117"))]}
+CLAIMED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
+    schedule(0, {"type": "linear", "start": NOW - 9 * DAY, "end": NOW - DAY}, "1000000", "1000000", "0",
+             {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True})]}
 FIRST = dict(SETTINGS, connected=False, status="not opened yet", settings=dict(SETTINGS["settings"], wallet_dir=""))
 WRONG = dict(SETTINGS, connected=False, status="no wallet at ~/lez-wallet")
 
@@ -67,6 +75,8 @@ SCENARIOS = {
     "first-run": ({"settings": FIRST}, ""),
     "recipient-empty": ({"list": {"ok": True, "time": NOW, "names": {}, "schedules": []}}, ""),
     "recipient": ({}, ""),
+    "recipient-cancelled": ({"list": CANCELLED}, ""),
+    "recipient-claimed": ({"list": CLAIMED}, ""),
     "confirm-public": ({"pre_claim_summary": summary(True, "caller", False)}, "root.beginClaim()"),
     "confirm-private": ({"pre_claim_summary": summary(True, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
     "confirm-private-short": ({"pre_claim_summary": summary(False, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
