@@ -731,6 +731,7 @@ Item {
                 Repeater {
                     model: root.mySchedules
                     delegate: Rectangle {
+                        id: schedCard
                         required property var modelData
                         Layout.fillWidth: true
                         implicitHeight: sched.implicitHeight + 20
@@ -775,13 +776,14 @@ Item {
                                     onPressed: root.doIrrevocable(modelData.id)
                                 }
                                 Repeater {
-                                    model: modelData.kind === "milestone" && modelData.mine.milestone_authority ? modelData.tranches : []
+                                    model: schedCard.modelData.kind === "milestone" && schedCard.modelData.mine.milestone_authority ? schedCard.modelData.tranches : []
                                     delegate: Action {
-                                        property int trancheIndex: index
-                                        visible: !modelData.signalled[index] && !modelData.cancelled
-                                        label: root.busySignal === String(modelData.id) + ":" + index ? "Signalling…" : "Signal tranche " + (index + 1)
-                                        enabledNow: root.busySignal !== String(modelData.id) + ":" + index
-                                        onPressed: root.doSignal(modelData.id, trancheIndex)
+                                        required property int index
+                                        readonly property var sched: schedCard.modelData
+                                        visible: !sched.signalled[index] && !sched.cancelled
+                                        label: root.busySignal === String(sched.id) + ":" + index ? "Signalling…" : "Signal tranche " + (index + 1)
+                                        enabledNow: root.busySignal !== String(sched.id) + ":" + index
+                                        onPressed: root.doSignal(sched.id, index)
                                     }
                                 }
                             }

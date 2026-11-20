@@ -15,5 +15,5 @@ X=(--exclude target --exclude 'result*' --exclude generated --exclude vest --exc
 rsync -a "${X[@]}" "$R/miniapp/module/" "$O/module/" --exclude core --exclude stage.sh
 for d in core sdk program vendor; do rsync -a "${X[@]}" "$R/$d" "$O/module/rust-lib/vest/"; done
 rsync -a "${X[@]}" "$R/miniapp/module/core" "$O/module/rust-lib/vest/miniapp/module/"
-rsync -a "${X[@]}" "$R/miniapp/" "$O/app/" --exclude module --exclude '*.test.mjs' --exclude README.md
+rsync -a "${X[@]}" "$R/miniapp/" "$O/app/" --exclude module --exclude tools --exclude '*.test.mjs' --exclude README.md
 echo "staged in $O"
