@@ -12,6 +12,12 @@
   inputs = {
     # The builder revision Basecamp 0.3.x locks (as the Names and LEZ Bridge modules use).
     logos-module-builder.url = "github:logos-co/logos-module-builder/de169fd45d7bdf6e28ce1f151b4c34880523ace9";
+    # A newer rust-overlay than the builder pins, for the rustc LEZ rc3 needs (1.98.1; the
+    # builder's own overlay stops at 1.94.1). It only picks the crate's compiler; the builder,
+    # the protocol and Qt stay at the revision Basecamp locks.
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "logos-module-builder/nixpkgs";
+    logos-module-builder.inputs.rust-overlay.follows = "rust-overlay";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
