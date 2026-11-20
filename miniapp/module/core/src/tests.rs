@@ -291,3 +291,16 @@ fn amounts_arrive_ready_formatted() {
     assert_eq!(claim["claimed_total_display"], "5 LEZ");
     display::set_decimals(9);
 }
+
+#[test]
+fn ids_arrive_as_text() {
+    assert_eq!(parse_index("id", "0"), Ok(0));
+    assert_eq!(parse_index("id", " 42 "), Ok(42));
+    assert!(parse_index("id", "")
+        .unwrap_err()
+        .contains("id must be a whole number"));
+    assert!(parse_index("index", "-1").is_err());
+    assert!(parse_index("id", "1.5").is_err());
+    let answer = parse(bad_input("id must be a whole number, got 'x'"));
+    assert_eq!(answer["ok"], false);
+}

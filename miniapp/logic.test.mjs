@@ -114,6 +114,10 @@ check("resolvedLines", L.resolvedLines([{ name: "alice", base58: ID }]), ["alice
 // ── Module replies ───────────────────────────────────────────────────────────────
 check("reply: plain, once and twice encoded", [L.reply('{"ok":true,"id":1}').id, L.reply(JSON.stringify('{"ok":true,"id":2}')).id, L.reply({ ok: false, error: "x" }).error], [1, 2, "x"]);
 check("reply: a missing module", [L.reply("Module not connected: vesting").ok, L.reply("Module not connected: vesting").missing], [false, true]);
+const refused = L.reply(JSON.stringify({ error: "Call refused", message: "expected integer at arg0, got number", method: "pre_claim_summary", module: "vesting" }));
+check("reply: the host's refusal is shown, not 'no answer'", [refused.ok, refused.error], [false, "Basecamp refused the call (pre_claim_summary): expected integer at arg0, got number"]);
+check("reply: an error object without ok or message", [L.reply({ error: "boom" }).ok, /boom/.test(L.reply({ error: "boom" }).error), /No answer/.test(L.reply({ error: "boom" }).error)], [false, true, false]);
+check("reply: a missing module as an error object", L.reply({ error: "Module not connected", module: "vesting" }).missing, true);
 check("reply: no answer", [L.reply("").ok, /No answer/.test(L.reply(undefined).error)], [false, true]);
 
 // ── The module's data ─────────────────────────────────────────────────────────────
@@ -136,6 +140,15 @@ check("validateBatch: no rows", L.validateBatch({ ...batchValid, rows: [] }).ok,
 check("validateBatch: milestone tranches", L.validateBatch({ ...batchShared, kind: "milestone", rows: [{ beneficiary: "Public/" + ID, amount: "100000", tranches: "40000,60000" }] }).ok, true);
 check("validateBatch: milestone needs tranches", L.validateBatch({ ...batchShared, kind: "milestone", rows: [{ beneficiary: "Public/" + ID, amount: "100000", tranches: "" }] }).ok, false);
 check("batchLine", [L.batchLine(1), L.batchLine(3)], ["Created 1 schedule.", "Created 3 schedules."]);
+
+// ── Every module call passes text: Basecamp refuses a QML number for an integer parameter ──
+{
+  const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  const calls = [...qml.matchAll(/\bcall\("(\w+)",\s*(\[[^\]]*\])/g)];
+  check("Main.qml calls the module", calls.length >= 12, true);
+  check("no module call passes a Number(…)", calls.filter(([, , args]) => /Number\(/.test(args)).map(([, m]) => m), []);
+  check("ids handed to calls are made with String(…)", [...qml.matchAll(/\bid = (\w+)\(/g)].map(m => m[1]).filter(f => f !== "String"), []);
+}
 
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;

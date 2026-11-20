@@ -270,6 +270,14 @@ export function reply(raw) {
         try { parsed = JSON.parse(parsed) } catch (error) { break }
     }
     if (parsed && typeof parsed === "object" && typeof parsed.ok === "boolean") return parsed
+    // The host's own refusal: {"error":"Call refused","message":"expected integer at arg0, …"}.
+    if (parsed && typeof parsed === "object" && parsed.error) {
+        var why = String(parsed.message || parsed.error)
+        var what = parsed.method ? " (" + parsed.method + ")" : ""
+        if (/module not connected|module not reachable|not loaded|is not installed|module not found/i.test(why + " " + parsed.error))
+            return { ok: false, missing: true, error: "The Vesting module isn't installed or isn't running: " + why + "." }
+        return { ok: false, error: "Basecamp refused the call" + what + ": " + why }
+    }
     var said = typeof raw === "string" ? raw : JSON.stringify(raw)
     if (/module not connected|module not reachable|no such (module|method)|unknown (module|method)|method not found|module not found|not loaded|is not installed/i.test(said || ""))
         return { ok: false, missing: true, error: "The Vesting module isn't installed or isn't running (" + said + "). Install it and reopen the app." }

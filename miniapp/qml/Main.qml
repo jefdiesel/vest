@@ -111,7 +111,8 @@ Item {
         return null
     }
 
-    /// One call of the vesting module. Reads answer in seconds; writes wait for the chain and a
+    /// One call of the vesting module; every argument is a string (Basecamp's call checker
+    /// refuses a QML number for an integer parameter, so ids and indexes go as text). Reads answer in seconds; writes wait for the chain and a
     /// private claim proves on this machine, so they get a long `patience` (ms).
     function call(method, args, done, patience) {
         if (!bridgeReady) {
@@ -230,7 +231,7 @@ Item {
         var isPrivate = destKind === "private"
         if (isPrivate && destAccount === "") { problem = "Choose a private account of your wallet."; return }
         preparing = true
-        var id = Number(recipientId)
+        var id = String(recipientId)
         call("pre_claim_summary", [id, isPrivate ? destAccount : ""], function(r) {
             preparing = false
             if (!r.ok) {
@@ -254,7 +255,7 @@ Item {
         if (!confirm || !confirm.fee.ok) return
         claiming = true
         resultLine = confirm.isPrivate ? "Proving the private claim on this machine; this takes minutes." : ""
-        var c = confirm, id = Number(c.id)
+        var c = confirm, id = String(c.id)
         var method = c.isPrivate ? "claim_private" : "claim_public"
         var args = c.isPrivate ? [id, c.destAccount] : [id]
         call(method, args, function(r) {
@@ -337,7 +338,7 @@ Item {
     function doCancel(id) {
         problem = ""; resultLine = ""
         busyCancel = String(id)
-        call("cancel", [Number(id)], function(r) {
+        call("cancel", [String(id)], function(r) {
             busyCancel = ""
             if (!r.ok) { fail(r.error || "The cancel failed."); resultLine = "Cancel failed: " + problem }
             else resultLine = Logic.cancelLine(id) + " Refunded " + r.refund_display + " to the creator."
@@ -348,7 +349,7 @@ Item {
     function doIrrevocable(id) {
         problem = ""; resultLine = ""
         busyAction = "irrevocable:" + id
-        call("make_irrevocable", [Number(id)], function(r) {
+        call("make_irrevocable", [String(id)], function(r) {
             busyAction = ""
             if (!r.ok) { fail(r.error || "The change failed."); resultLine = "Make irrevocable failed: " + problem }
             else resultLine = "Made schedule " + Logic.short(id) + " irrevocable."
@@ -359,7 +360,7 @@ Item {
     function doSignal(id, index) {
         problem = ""; resultLine = ""
         busySignal = String(id) + ":" + index
-        call("signal_milestone", [Number(id), Number(index)], function(r) {
+        call("signal_milestone", [String(id), String(index)], function(r) {
             busySignal = ""
             if (!r.ok) { fail(r.error || "The signal failed."); resultLine = "Signal failed: " + problem }
             else resultLine = Logic.signalLine(index, id) + " Unlocked " + r.amount_display + "."
@@ -372,7 +373,7 @@ Item {
         var typed = Logic.accountInput(target)
         if (!typed.ok) { fail(typed.error); resultLine = "Transfer failed: " + problem; return }
         busyAction = "transfer:" + id
-        call("transfer_beneficiary", [Number(id), typed.account], function(r) {
+        call("transfer_beneficiary", [String(id), typed.account], function(r) {
             busyAction = ""
             if (!r.ok) { fail(r.error || "The transfer failed."); resultLine = "Transfer failed: " + problem }
             else resultLine = "Transferred schedule " + Logic.short(id) + " to "

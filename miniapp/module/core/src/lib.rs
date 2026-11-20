@@ -99,6 +99,19 @@ fn b58(account: &AccountId) -> String {
     names::base58(account)
 }
 
+/// A schedule id or tranche index as the module's interface takes it: decimal text (Basecamp's
+/// call checker refuses a QML number for an integer parameter, so every id travels as a string).
+pub fn parse_index(field: &str, text: &str) -> Result<u64, String> {
+    text.trim()
+        .parse::<u64>()
+        .map_err(|_| format!("{field} must be a whole number, got '{text}'"))
+}
+
+/// The failure answer for input the module refused before any call.
+pub fn bad_input(message: impl Into<String>) -> String {
+    fail(message)
+}
+
 /// Run `body`, turning an `Err(text)` into a failure answer.
 fn answer(body: impl FnOnce() -> Result<String, String>) -> String {
     body().unwrap_or_else(fail)
