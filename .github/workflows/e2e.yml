@@ -11,6 +11,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to the same branch replaces a run still in progress.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   LEZ_TAG: v0.4.0-rc3
   LEZ_COMMIT: "bafd07be"
@@ -21,8 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - name: Unit tests (core, SDK without the chain, CLI with the JSON backend, program events)
-        run: cargo test -p vesting-core -p vesting-sdk -p vesting-cli -p vesting-program
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Unit tests (core, SDK and its LNS resolver, CLI on the JSON backend, program events, IDL check, Basecamp module core, vendored logos-sdk crates)
+        run: cargo test -p vesting-core -p vesting-sdk -p vesting-cli -p vesting-program -p idl-check -p vesting-module-core -p logos-lns -p logos-rpc -p logos-accounts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Mini-app and viewer logic (node)
+        run: node --test web/viewer/test/logic.test.mjs miniapp/logic.test.mjs reference/faucet-miniapp/logic.test.mjs
 
   e2e:
     runs-on: ubuntu-24.04
