@@ -680,6 +680,7 @@ Item {
                     FactRow { look: root.look; Layout.fillWidth: true; key: "From"; value: root.selected ? (root.fromFull ? Logic.base58Of(root.selected.creator) : (Logic.nameOf(root.selected.creator, root.names) || Logic.short(Logic.base58Of(root.selected.creator)))) : ""; monospace: root.fromFull }
                     Link { look: root.look; visible: !!root.selected; text: root.fromFull ? "Hide" : "Show"; onPressed: root.fromFull = !root.fromFull }
                     Link { look: root.look; visible: !!root.selected; text: "Copy"; onPressed: root.copy(Logic.base58Of(root.selected.creator), "Address") }
+                    Link { look: root.look; visible: !!root.selected && root.connected; text: "Open in Names"; onPressed: wallet.show(Logic.nameOf(root.selected.creator, root.names) || Logic.base58Of(root.selected.creator), function(r) { if (!r || !r.ok) root.say("Names Wallet couldn't open it" + (r && r.error ? ": " + r.error : "") + ".", true) }) }
                 }
                 RowLayout {
                     visible: !!(root.selected && root.selected.address)

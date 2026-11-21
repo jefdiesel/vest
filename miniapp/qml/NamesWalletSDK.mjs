@@ -166,6 +166,8 @@ export function requestLine(request, what) {
     if (r.state === "rejected") return "You declined " + thing + " in Names Wallet. Nothing was sent."
     if (r.state === "expired") return "Nobody approved " + thing + " within 10 minutes, so Names Wallet dropped it. Nothing was sent."
     if (r.state === "cancelled") return "You withdrew " + thing + ". Nothing was sent."
+    // A reason about the wallet's own setup comes whole ("Names Wallet needs an update to send this").
+    if (r.state === "failed" && /^Names Wallet /.test(String(r.error || ""))) return String(r.error).replace(/\.?$/, ".")
     if (r.state === "failed") return "Names Wallet couldn't send " + thing + (r.error ? ": " + r.error : "") + "."
     return ""
 }
@@ -380,6 +382,22 @@ export function create(host) {
     /// Bring the wallet's app forward (Basecamp's `basecamp.apps.launch`; declare it in
     /// metadata.json `uses`). The wallet shows your app again once the person answers.
     wallet.open = function() { if (h.open && wallet.current && wallet.current.app) h.open(wallet.current.app) }
+
+    /// Show the person a name, or an account with its name, in the wallet's own lookup:
+    /// Names comes forward on that name's card (the `names.open` intent, read only: nothing is
+    /// asked or changed). `nameOrAccount`: "jef", "jef.lez" or a base58 account ID.
+    /// done(r): {ok, error} once the wallet has it on screen ("unavailable" when it can't:
+    /// check has("show_name")). Declare `{ "intent": "names.open" }` in metadata.json `uses`;
+    /// Basecamp may ask the person once to let your app open it.
+    wallet.show = function(nameOrAccount, done) {
+        var text = String(nameOrAccount === undefined || nameOrAccount === null ? "" : nameOrAccount).trim()
+        var finish = function(r) { if (done) done(r) }
+        if (text === "") { finish({ ok: false, error: "bad_request" }); return }
+        if (!h.show) { finish({ ok: false, error: "unavailable" }); return }
+        h.show(text, function(res) {
+            finish(res && res.ok ? { ok: true, error: "" } : { ok: false, error: String(res && res.error || "failed") })
+        })
+    }
 
     /// Read `request` (its id, or the request) every POLL_MS until it is no longer open
     /// (options.status: another method to read it with, options.cancel: to withdraw it).
