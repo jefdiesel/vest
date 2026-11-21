@@ -210,7 +210,11 @@ impl NamesBackend {
         let program = lee(self.program);
         let seed = schedule_seed(&creator, &nonce);
         let address = lee_core::account::AccountId::for_public_pda(&program, &seed).into_value();
-        if self.state_of(&address).map_err(|e| e.to_string())?.is_some() {
+        if self
+            .state_of(&address)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
             return Err("a schedule with this nonce exists already; ask again".into());
         }
         let schedule = NewSchedule {
@@ -250,7 +254,12 @@ impl NamesBackend {
     /// The `propose_call` for `op` on native-LEZ schedule `id` by `caller` (the account the
     /// person must choose), checked first at the network's time as the program will run it. The
     /// schedule's data and LEZ, the creator's LEZ for a cancel's refund, and the clock.
-    pub fn op_call(&self, id: ScheduleId, caller: AccountId, op: &NamesOp) -> Result<Value, String> {
+    pub fn op_call(
+        &self,
+        id: ScheduleId,
+        caller: AccountId,
+        op: &NamesOp,
+    ) -> Result<Value, String> {
         let address = self.address(id).map_err(|e| e.to_string())?;
         let state = self
             .state_of(&address)
@@ -284,23 +293,33 @@ impl NamesBackend {
                 } else {
                     json!({ "account": base58(&schedule.creator), "balance": true })
                 });
-                Instruction::Cancel { schedule: schedule_id }
+                Instruction::Cancel {
+                    schedule: schedule_id,
+                }
             }
             NamesOp::MakeIrrevocable => {
                 vesting_core::make_irrevocable(&schedule, caller, now).map_err(|e| e.message())?;
-                Instruction::MakeIrrevocable { schedule: schedule_id }
+                Instruction::MakeIrrevocable {
+                    schedule: schedule_id,
+                }
             }
             NamesOp::SignalMilestone(index) => {
                 let (_, unlocked, _) =
                     vesting_core::signal_milestone(&schedule, caller, *index as usize, now)
                         .map_err(|e| e.message())?;
                 amount = unlocked;
-                Instruction::SignalMilestone { schedule: schedule_id, index: *index }
+                Instruction::SignalMilestone {
+                    schedule: schedule_id,
+                    index: *index,
+                }
             }
             NamesOp::TransferBeneficiary(to) => {
                 vesting_core::transfer_beneficiary(&schedule, caller, *to, now)
                     .map_err(|e| e.message())?;
-                Instruction::TransferBeneficiary { schedule: schedule_id, new_beneficiary: lee(*to) }
+                Instruction::TransferBeneficiary {
+                    schedule: schedule_id,
+                    new_beneficiary: lee(*to),
+                }
             }
         };
         accounts.push(clock_entry());

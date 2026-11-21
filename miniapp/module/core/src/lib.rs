@@ -1086,7 +1086,8 @@ impl Module {
         answer(|| {
             if !self.names_mode() {
                 return Err(
-                    "create_call is for Names Wallet; this module signs with a wallet folder".into(),
+                    "create_call is for Names Wallet; this module signs with a wallet folder"
+                        .into(),
                 );
             }
             let mut row: Value =
@@ -1124,7 +1125,9 @@ impl Module {
         self.forget_reads();
         answer(|| {
             if !self.names_mode() {
-                return Err("this call is for Names Wallet; this module signs with a wallet folder".into());
+                return Err(
+                    "this call is for Names Wallet; this module signs with a wallet folder".into(),
+                );
             }
             let schedule = self.schedule(id)?;
             let caller = self.names_caller(&candidates(&schedule), role)?;
@@ -1141,17 +1144,31 @@ impl Module {
     /// not vested goes back to the creator, `amount`). Reply as `create_call`'s, without the
     /// schedule fields beyond `schedule_address`.
     pub fn cancel_call(&mut self, id: u64) -> String {
-        self.op_call(id, names_backend::NamesOp::Cancel, |s| vec![s.cancel_authority], "cancel authority", |amount| {
-            format!("Cancel Vest schedule {id}: {amount} not yet vested goes back to its creator")
-        })
+        self.op_call(
+            id,
+            names_backend::NamesOp::Cancel,
+            |s| vec![s.cancel_authority],
+            "cancel authority",
+            |amount| {
+                format!(
+                    "Cancel Vest schedule {id}: {amount} not yet vested goes back to its creator"
+                )
+            },
+        )
     }
 
     /// `propose_call` arguments that make schedule `id` irrevocable (its cancel authority or
     /// creator signs).
     pub fn irrevocable_call(&mut self, id: u64) -> String {
-        self.op_call(id, names_backend::NamesOp::MakeIrrevocable, |s| vec![s.cancel_authority, s.creator], "cancel authority or creator", |_| {
-            format!("Make Vest schedule {id} irrevocable: it can never be cancelled after this")
-        })
+        self.op_call(
+            id,
+            names_backend::NamesOp::MakeIrrevocable,
+            |s| vec![s.cancel_authority, s.creator],
+            "cancel authority or creator",
+            |_| {
+                format!("Make Vest schedule {id} irrevocable: it can never be cancelled after this")
+            },
+        )
     }
 
     /// `propose_call` arguments that signal milestone tranche `index` of schedule `id` (its
@@ -1173,9 +1190,13 @@ impl Module {
             Err(error) => return fail(error),
         };
         let shown = name.unwrap_or_else(|| b58(&to));
-        self.op_call(id, names_backend::NamesOp::TransferBeneficiary(to), |s| vec![s.beneficiary], "beneficiary", |_| {
-            format!("Move Vest schedule {id} to a new beneficiary, {shown}")
-        })
+        self.op_call(
+            id,
+            names_backend::NamesOp::TransferBeneficiary(to),
+            |s| vec![s.beneficiary],
+            "beneficiary",
+            |_| format!("Move Vest schedule {id} to a new beneficiary, {shown}"),
+        )
     }
 
     /// Resolve an LNS name (or check an address): `{name, account, base58}`.

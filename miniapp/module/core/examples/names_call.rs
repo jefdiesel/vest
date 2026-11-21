@@ -21,8 +21,14 @@ fn main() {
         "cancel" | "irrevocable" => {
             let imported: serde_json::Value =
                 serde_json::from_str(&module.import_schedule(arg)).expect("JSON");
-            let id = imported["id"].as_u64().unwrap_or_else(|| panic!("not imported: {imported}"));
-            if what == "cancel" { module.cancel_call(id) } else { module.irrevocable_call(id) }
+            let id = imported["id"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("not imported: {imported}"));
+            if what == "cancel" {
+                module.cancel_call(id)
+            } else {
+                module.irrevocable_call(id)
+            }
         }
         other => panic!("unknown call {other}"),
     };
