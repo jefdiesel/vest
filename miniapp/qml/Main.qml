@@ -168,6 +168,13 @@ Item {
         }, function(r) { loading = false })
     }
 
+    /// Take the person to the Names app, where the request waits; Names brings them back here
+    /// once they answer (Basecamp's own navigation intent, declared in metadata.json `uses`).
+    function openNames() {
+        if (typeof logos !== "undefined" && logos.request)
+            logos.request("basecamp.apps.launch", { app: "names_ui" }, function() {})
+    }
+
     /// 1. Connect: the person picks, in the Names app, which accounts Vest may see.
     function connectNames() {
         say("")
@@ -176,6 +183,7 @@ Item {
             accessRequest = v
             namesState = "asking"
             pollAccess.start()
+            openNames()
         })
     }
 
@@ -384,6 +392,7 @@ Item {
                 claimRequest = v
                 claimRequest.amountDisplay = c.amountDisplay
                 pollClaim.start()
+                openNames()
             }, function(r) { busy = false; workingOn = ""; say(r.error, true) })
             return
         }
@@ -617,7 +626,7 @@ Item {
                             Body {
                                 visible: step.now
                                 text: step.modelData.n === 1 && root.namesState === "asking"
-                                    ? "Names Wallet is asking you now. Open the Names app, tick the accounts you use for Vest, and approve."
+                                    ? "Names Wallet is open with the request: tick the accounts you use for Vest and approve. You come back here after."
                                     : step.modelData.detail
                             }
                             Body {

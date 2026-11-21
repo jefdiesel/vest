@@ -1,7 +1,7 @@
 {
   "name": "vesting_ui",
   "display_name": "Vest",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "ui_qml",
   "category": "finance",
   "description": "Pay tokens out over time, or claim what has vested to you; signs through your Names Wallet",
@@ -14,7 +14,7 @@
     }
   ],
   "provides": [],
-  "uses": [],
+  "uses": [ { "intent": "basecamp.apps.launch" } ],
   "nix": {
     "packages": {
       "build": [],
