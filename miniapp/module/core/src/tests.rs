@@ -522,7 +522,7 @@ fn names_wallet_refuses_what_it_cant_sign_in_plain_words() {
             answer["error"]
                 .as_str()
                 .unwrap()
-                .contains("Names Wallet can't sign this for Vest yet"),
+                .contains("approve it in the Names app"),
             "{answer}"
         );
     }
@@ -547,4 +547,128 @@ fn names_wallet_refuses_what_it_cant_sign_in_plain_words() {
         answer["error"].as_str().unwrap().contains("token schedule"),
         "{answer}"
     );
+}
+
+/// The clock entry Names Wallet 0.18 takes, with the rc3 clock's ids.
+#[test]
+fn the_clock_entry_names_the_rc3_clock() {
+    assert_eq!(
+        names_backend::clock_entry(),
+        json!({
+            "account": "4BdcjoXkq786TMWcBGGHqcxeLYMZmn17rL4eM9ZyRWNT",
+            "program": "2hwaRW8sMnyKLLRbDRw8k68tiv9bnfq98oxcdtcp157Z",
+        })
+    );
+}
+
+#[test]
+fn names_wallet_creates_a_schedule_with_a_call_that_reads_the_clock() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc.clone());
+    let program = module.effective_network().unwrap().program.unwrap();
+    // Not yet connected in Names: the creator's account isn't one Vest was given.
+    let row = create_row("1000", linear(500, 1_500));
+    let refused = parse(module.create_call(&row));
+    assert!(refused["error"].as_str().unwrap().contains("hasn't shared"), "{refused}");
+    parse(module.set_accounts(&json!([{ "account": format!("Public/{}", names::base58(&[1; 32])), "account_kind": "public", "balance": "5000" }]).to_string()));
+    // A bad schedule is refused at the network's time, before anything is asked.
+    rpc.push_ok("getAccountView", clock_answer(400));
+    let bad = parse(module.create_call(&create_row("1000", linear(1_500, 500))));
+    assert_eq!(bad["ok"], false, "{bad}");
+    // The clock, then the schedule's address (nothing there yet).
+    rpc.push_ok("getAccountView", clock_answer(400));
+    rpc.push_ok("getAccountView", json!({ "data": { "actor_states": {} } }));
+    let call = parse(module.create_call(&row));
+    assert_eq!(call["ok"], true, "{call}");
+    assert_eq!(call["program"], names::base58(&program));
+    assert_eq!(call["amount"], "1000");
+    assert_eq!(call["caller"], format!("Public/{}", names::base58(&[1; 32])));
+    assert!(call["summary"].as_str().unwrap().starts_with("Create a Vest schedule"), "{call}");
+    // The message is the program's Create of exactly this schedule, native LEZ, at its address.
+    let bytes = hex::decode(call["instruction_hex"].as_str().unwrap()).unwrap();
+    let vesting_program::Instruction::Create { schedules } = borsh::from_slice(&bytes).unwrap() else {
+        panic!("not a create");
+    };
+    assert_eq!(schedules.len(), 1);
+    let n = &schedules[0];
+    assert_eq!((n.asset, n.total, n.beneficiary), (vesting_program::Asset::Native, 1000, lee_core::account::AccountId::new([2; 32])));
+    assert_eq!(n.kind, vesting_core::ScheduleKind::Linear { start: 500, end: 1_500 });
+    let program_id = lee_core::account::AccountId::new(program);
+    let creator = lee_core::account::AccountId::new([1; 32]);
+    let address = vesting_program::schedule_address(&program_id, &creator, &n.nonce);
+    let s = names::base58(address.value());
+    assert_eq!(call["schedule_address"], s);
+    assert_eq!(call["schedule_address_hex"], hex::encode(address.value()));
+    // The accounts: the creator's LEZ, the schedule's account (made from its seed) and its LEZ,
+    // and the network clock.
+    let seed = hex::encode(vesting_program::schedule_seed(&creator, &n.nonce).as_ref());
+    let accounts: Value = serde_json::from_str(call["accounts_json"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        accounts,
+        json!([
+            { "account": "signer", "balance": true },
+            { "account": s, "seed": seed },
+            { "account": s, "seed": seed, "balance": true },
+            names_backend::clock_entry(),
+        ])
+    );
+    // Each call picks a new address.
+    rpc.push_ok("getAccountView", clock_answer(400));
+    rpc.push_ok("getAccountView", json!({ "data": { "actor_states": {} } }));
+    let again = parse(module.create_call(&row));
+    assert_ne!(again["schedule_address"], call["schedule_address"]);
+    // A token schedule can't be created through Names yet.
+    let token_row = json!({ "creator": hex_id(1), "beneficiary": hex_id(2), "token": hex_id(6), "total": "10", "kind": linear(500, 1_500) }).to_string();
+    let token = parse(module.create_call(&token_row));
+    assert!(token["error"].as_str().unwrap().contains("token schedule"), "{token}");
+}
+
+#[test]
+fn names_wallet_cancels_and_manages_a_schedule_with_calls_that_read_the_clock() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc.clone());
+    let program = module.effective_network().unwrap().program.unwrap();
+    let schedule = linear_schedule();
+    let s = [0x46u8; 32];
+    let sb = names::base58(&s);
+    let state = || schedule_answer(&program, &schedule, vesting_program::Asset::Native);
+    rpc.push_ok("getAccountView", state());
+    parse(module.import_schedule(&hex::encode(s)));
+    // The cancel authority (the creator, account 1) signs: the refund goes to its own LEZ.
+    parse(module.set_accounts(&json!([{ "account": format!("Public/{}", names::base58(&[1; 32])), "account_kind": "public" }]).to_string()));
+    for _ in 0..2 {
+        rpc.push_ok("getAccountView", state());
+    }
+    rpc.push_ok("getAccountView", clock_answer(400));
+    let cancel = parse(module.cancel_call(0));
+    assert_eq!(cancel["ok"], true, "{cancel}");
+    assert_eq!(cancel["amount"], "600", "what hasn't vested at 400 of 1000");
+    let expected = vesting_program::Instruction::Cancel { schedule: lee_core::account::AccountId::new(s) };
+    assert_eq!(cancel["instruction_hex"], hex::encode(borsh::to_vec(&expected).unwrap()));
+    let accounts: Value = serde_json::from_str(cancel["accounts_json"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        accounts,
+        json!([sb, { "account": sb, "balance": true }, { "account": "signer", "balance": true }, names_backend::clock_entry()])
+    );
+    // Irrevocable: the schedule's data and LEZ, and the clock; nothing of the signer's LEZ.
+    for _ in 0..2 {
+        rpc.push_ok("getAccountView", state());
+    }
+    rpc.push_ok("getAccountView", clock_answer(400));
+    let irrevocable = parse(module.irrevocable_call(0));
+    assert_eq!(irrevocable["ok"], true, "{irrevocable}");
+    let accounts: Value = serde_json::from_str(irrevocable["accounts_json"].as_str().unwrap()).unwrap();
+    assert_eq!(accounts, json!([sb, { "account": sb, "balance": true }, names_backend::clock_entry()]));
+    // Not the milestone kind: refused in the program's words before anything is asked.
+    for _ in 0..2 {
+        rpc.push_ok("getAccountView", state());
+    }
+    rpc.push_ok("getAccountView", clock_answer(400));
+    assert_eq!(parse(module.signal_call(0, 0))["ok"], false);
+    // A transfer needs the beneficiary, which Vest wasn't given.
+    rpc.push_ok("getAccountView", state());
+    let refused = parse(module.transfer_call(0, &hex_id(4)));
+    assert!(refused["error"].as_str().unwrap().contains("beneficiary"), "{refused}");
 }

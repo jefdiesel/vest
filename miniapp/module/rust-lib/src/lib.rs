@@ -50,6 +50,17 @@ pub trait VestingModule: Send + 'static {
     fn set_accounts(&mut self, accounts: String) -> String;
     /// The Names Wallet `propose_call` arguments that claim schedule `id` publicly.
     fn claim_call(&mut self, id: String) -> String;
+    /// The `propose_call` arguments that create one native-LEZ schedule (the same JSON object as
+    /// `create`); after the request is done, `import_schedule(schedule_address)`.
+    fn create_call(&mut self, params: String) -> String;
+    /// The `propose_call` arguments that cancel schedule `id`.
+    fn cancel_call(&mut self, id: String) -> String;
+    /// The `propose_call` arguments that make schedule `id` irrevocable.
+    fn irrevocable_call(&mut self, id: String) -> String;
+    /// The `propose_call` arguments that signal milestone tranche `index` of schedule `id`.
+    fn signal_call(&mut self, id: String, index: String) -> String;
+    /// The `propose_call` arguments that move schedule `id` to `new_beneficiary`.
+    fn transfer_call(&mut self, id: String, new_beneficiary: String) -> String;
 
     /// The host's context: the persistence folder for settings and the id map.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -155,6 +166,33 @@ impl VestingModule for Vesting {
     fn claim_call(&mut self, id: String) -> String {
         match parse_index("id", &id) {
             Ok(id) => self.m().claim_call(id),
+            Err(error) => bad_input(error),
+        }
+    }
+    fn create_call(&mut self, params: String) -> String {
+        self.m().create_call(&params)
+    }
+    fn cancel_call(&mut self, id: String) -> String {
+        match parse_index("id", &id) {
+            Ok(id) => self.m().cancel_call(id),
+            Err(error) => bad_input(error),
+        }
+    }
+    fn irrevocable_call(&mut self, id: String) -> String {
+        match parse_index("id", &id) {
+            Ok(id) => self.m().irrevocable_call(id),
+            Err(error) => bad_input(error),
+        }
+    }
+    fn signal_call(&mut self, id: String, index: String) -> String {
+        match (parse_index("id", &id), parse_index("index", &index)) {
+            (Ok(id), Ok(index)) => self.m().signal_call(id, index),
+            (Err(error), _) | (_, Err(error)) => bad_input(error),
+        }
+    }
+    fn transfer_call(&mut self, id: String, new_beneficiary: String) -> String {
+        match parse_index("id", &id) {
+            Ok(id) => self.m().transfer_call(id, &new_beneficiary),
             Err(error) => bad_input(error),
         }
     }
