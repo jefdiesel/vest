@@ -379,36 +379,6 @@ export function resolvedLines(resolved) {
     return (resolved || []).map(function(r) { return r.name + " resolves to " + r.base58 + "." })
 }
 
-/// "100000, 200000;300000" → ["100000", "200000", "300000"].
-export function parseTrancheText(text) {
-    return String(text == null ? "" : text).split(/[,;]/)
-        .map(function(x) { return String(x).trim() })
-        .filter(function(x) { return x !== "" })
-}
-
-/// Validate a batch: one shared kind/token/dates/flags, plus one row per recipient.
-/// Each row is {beneficiary, amount, tranches} (tranches is text for milestone kinds).
-export function validateBatch(p) {
-    p = p || {}
-    var e = [], rows = p.rows || []
-    if (KINDS.indexOf(p.kind) < 0) e.push("Choose a schedule kind.")
-    if (tokenProblem(p.token)) e.push(tokenProblem(p.token))
-    if (p.kind !== "milestone") e = e.concat(dateProblems(p))
-    if (rows.length === 0) e.push("Add at least one recipient.")
-    for (var i = 0; i < rows.length; i++) {
-        var r = rows[i] || {}
-        var one = validateCreate({
-            kind: p.kind, beneficiary: r.beneficiary, token: p.token, amount: r.amount,
-            start: p.start, cliff: p.cliff, end: p.end,
-            tranches: p.kind === "milestone" ? parseTrancheText(r.tranches) : [],
-            cancelable: p.cancelable, transferable: p.transferable,
-            cancelAuthority: p.cancelAuthority, milestoneAuthority: p.milestoneAuthority
-        })
-        for (var j = 0; j < one.errors.length; j++) e.push("Recipient " + (i + 1) + ": " + one.errors[j])
-    }
-    return { ok: e.length === 0, errors: e }
-}
-
 /// Validate every parameter of a new schedule: { ok, errors: [...] }.
 /// `p.start`, `p.cliff`, `p.end` are epoch ms; `p.tranches` is an array of amount strings.
 export function validateCreate(p) {
@@ -454,62 +424,6 @@ function dateProblems(p) {
 
 // ── Pre-claim confirmation: fee, privacy, result lines ──────────────────────────────
 
-/// The fee check of a module pre-claim summary: {ok, message}. The module simulated the claim
-/// (the wallet's dry run) and says whether the fee's payer will hold enough; on a ledger
-/// without fees there is nothing to check.
-export function feeCheck(summary) {
-    summary = summary || {}
-    var fee = summary.estimated_fee_display || "0 LEZ"
-    var payer = summary.fee_payer === "claim_target"
-        ? "The private account (paid from what the claim brings it)"
-        : "Your public account"
-    if (!summary.fee_simulated) return { ok: true, message: "No network fee on this ledger." }
-    if (summary.revert_reason) return { ok: false, message: "The simulated claim would fail: " + summary.revert_reason }
-    if (summary.fee_covered === false)
-        return { ok: false, message: payer + " can't pay the estimated fee of " + fee + ": it will hold "
-            + (summary.fee_available_display || "0 LEZ") + ". Fund it, or choose a public destination." }
-    if (summary.fee_covered === true)
-        return { ok: true, message: payer + " can pay the estimated fee of " + fee + "." }
-    return { ok: true, message: "Estimated fee " + fee + "." }
-}
-
-/// A transaction answer ({hash, block}) as a short text, or "".
-export function txText(tx) {
-    if (!tx || !tx.hash) return ""
-    return "tx " + short(tx.hash) + (tx.block ? " in block " + tx.block : "")
-}
-
-/// The privacy disclosure shown before every private claim.
-export function privacyDisclosure() {
-    var visible = ["the claim amount", "the beneficiary address", "the vesting schedule address"]
-    var hidden = ["which private account receives the tokens", "any later movement of those tokens"]
-    return {
-        visible: visible,
-        hidden: hidden,
-        text: "Visible on-chain: " + visible.join(", ") + ". Not traceable: " + hidden.join(", ") + "."
-    }
-}
-
-/// A plain result line after a claim.
-export function claimLine(amount, token, dest, tx, isPrivate) {
-    return "Claimed " + amountText(amount, token) + " to " + dest + (isPrivate ? " (private)" : " (public)")
-        + (tx ? " · " + tx : "") + "."
-}
-
-/// Plain result line when the module already formatted the amount for display.
-export function claimLineDisplay(display, dest, tx, isPrivate) {
-    var t = typeof tx === "string" ? tx : txText(tx)
-    return "Claimed " + display + " to " + dest + (isPrivate ? " (private)" : " (public)")
-        + (t ? " · " + t : "") + "."
-}
-export function createLine(id) { return "Created schedule " + short(id) + "." }
-export function batchLine(n) { return "Created " + num(n) + " schedule" + (num(n) === 1 ? "" : "s") + "." }
-export function cancelLine(id) { return "Cancelled schedule " + short(id) + "." }
-export function signalLine(index, id) { return "Signalled milestone " + (num(index) + 1) + " on " + short(id) + "." }
-
-/// The actionable error when a claim is attempted before anything is vested.
-export function nothingClaimable(s, now) { return "Nothing claimable yet. " + nextUnlock(s, now).text }
-
 // ── Plain words for the screen ────────────────────────────────────────────────────────
 
 /// Native LEZ has 9 decimals.
@@ -527,27 +441,6 @@ export function toBase(text, decimals) {
     while (frac.length < d) frac += "0"
     var out = ((m[1] || "") + frac).replace(/^0+/, "")
     return out === "" ? "" : out
-}
-
-/// What went wrong connecting, as the person can act on it ("" when nothing did, or before
-/// they tried: a first run is not an error). `status` is the module's own words.
-export function connectProblem(info) {
-    if (!info || info.connected) return ""
-    var s = info.settings || {}
-    if (!String(s.wallet_dir || "").trim()) return ""
-    var why = String(info.status || "")
-    if (why === "" || /not opened yet/i.test(why)) return ""
-    if (/no wallet at|storage\.json|No such file/i.test(why)) return "No wallet found in that folder. Choose the folder that holds wallet_config.json and storage.json."
-    if (/encrypted/i.test(why)) return "This wallet is locked with a password. Enter it in Settings."
-    if (/serves chain/i.test(why)) return "That RPC is on a different network than the one chosen. Check the network settings."
-    if (/getChannelId|error sending request|connection|timed out|dns/i.test(why)) return "Can't reach the network right now. Check the connection and try again."
-    if (/no vesting program/i.test(why)) return "This network has no Vest program. Set one in the network settings."
-    return "Couldn't connect: " + why.replace(/^Not connected:\s*/i, "") + (/[.?!]$/.test(why) ? "" : ".")
-}
-
-/// Whether the first-run card shows: nothing connected and no wallet chosen yet.
-export function firstRun(info) {
-    return !!info && !info.connected && !String((info.settings || {}).wallet_dir || "").trim()
 }
 
 /// Fully claimed: everything was paid to the beneficiary.
@@ -636,7 +529,6 @@ export function payeeLine(typed, r) {
 // The calls, retries, states and request words are the Names Wallet SDK's (NamesWalletSDK.mjs,
 // copied unchanged from the Names repository); Vest keeps only its own words here.
 
-export const NAMES_MISSING = SDK.WORDS.missing
 export const requestLine = SDK.requestLine
 export const requestOpen = SDK.requestOpen
 
@@ -778,4 +670,4 @@ export function writeWhat(what) {
 export const GUIDE_URL = "https://github.com/jefdiesel/vest/blob/main/docs/USER-GUIDE.md"
 
 /// Why paying out needs a wallet folder for now (Names Wallet's program calls can't carry it).
-export const NAMES_CANT_PAY = "Names Wallet can approve claims, but not yet a new schedule, a cancel or a milestone: those also read the network's clock in the same step, and Names Wallet's program calls can't include that yet. Until they can, use a wallet folder (Settings, Advanced) to pay out. You can still read how it works below."
+export const NAMES_CANT_PAY = "Names Wallet can approve claims, but a new schedule, a cancel or a milestone needs Names Wallet 0.18 or later: those also read the network's clock in the same step. Update Names, then come back. You can still read how it works below."

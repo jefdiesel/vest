@@ -3,10 +3,10 @@
 // Two modules do the work. The `vesting` core module (../module) reads the network: schedules,
 // the clock, what is claimable, and builds the claim call. The person's Names Wallet (the `names`
 // module, its Wallet Provider SDK) shows Vest the accounts the person chooses and signs every
-// change once the person approves it in the Names app: Vest never sees a key. Vest talks to it
-// through the Names Wallet SDK (NamesWallet.qml + NamesWalletSDK.mjs, copied unchanged from the
-// Names repository's sdk/qml/). People without Names Wallet can give a wallet folder instead
-// (Settings, Advanced).
+// change once the person approves it in the Names app: Vest never sees a key, and has no signer
+// of its own. Vest talks to the wallet only through the Names Wallet SDK (NamesWallet.qml +
+// NamesWalletSDK.mjs, copied unchanged from the Names repository's sdk/qml/), which finds the
+// wallet installed (Names, or another that implements the SDK) and never makes Vest name one.
 //
 // Guides are built in: a "How it works" path for paying out and for receiving, shown on first run
 // and one click from the header; the choices explained where they are made; what happens next
@@ -31,22 +31,21 @@ Item {
     property real effectiveTime: 0             // `now`: the network's clock
     readonly property bool bridgeReady: typeof logos !== "undefined" && !!logos.callModule
     readonly property bool chainOpen: info !== null && info.connected === true
-    readonly property bool walletMode: info !== null && info.signer === "wallet"
 
     // ── Names Wallet (the Names Wallet SDK) ────────────────────────────────────────
-    NamesWallet { id: namesWallet; bridge: typeof logos !== "undefined" ? logos : null }
+    NamesWallet { id: wallet; app: "vesting_ui"; bridge: typeof logos !== "undefined" ? logos : null }
     // "checking" | "missing" | "otherZone" | "disconnected" | "asking" | "connected"
-    readonly property string namesState: namesWallet.status
-    readonly property string namesProblem: namesState === "otherZone" ? Logic.OTHER_ZONE : namesWallet.problem
+    readonly property string namesState: wallet.status
+    readonly property string namesProblem: namesState === "otherZone" ? Logic.OTHER_ZONE : wallet.problem
     property var accessRequest: null           // the connect request while it waits
     property var claimRequest: null            // the claim request while it waits
     property var claimWatch: null              // its watch (withdraw)
     property var writeRequest: null            // a create, cancel, permanent, milestone or transfer while it waits
     // Names Wallet 0.18+: its calls may read the network clock
-    readonly property bool namesCanCall: namesWallet.features.indexOf("call_reads_clock") >= 0
-    readonly property bool connected: walletMode ? chainOpen : (namesState === "connected" && chainOpen)
-    // Who signs creates, cancels, milestones and transfers: the wallet folder, or Names Wallet 0.18+.
-    readonly property bool canWrite: walletMode || namesCanCall
+    readonly property bool namesCanCall: wallet.features.indexOf("call_reads_clock") >= 0
+    readonly property bool connected: namesState === "connected" && chainOpen
+    // Creates, cancels, milestones and transfers need Names Wallet 0.18+ (calls that read the clock).
+    readonly property bool canWrite: namesCanCall
 
     // ── View state ──────────────────────────────────────────────────────────────────
     property string tab: "receive"             // receive | pay | settings
@@ -54,8 +53,6 @@ Item {
     property string guideRole: "receive"
     property real tick: Date.now()
     property var recipientId: null
-    property string destKind: "public"
-    property string destAccount: ""
     property var confirm: null                 // the claim, before Names Wallet is asked
     property var sheet: null                   // a step that can't be undone: {kind, schedule}
     property string resultLine: ""
@@ -71,15 +68,12 @@ Item {
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
     property string cKind: "linear"
-    property bool batchMode: false
     property bool cCancelable: true
     property bool cTransferable: false
     property var cTranches: [""]
-    property var bRows: [ { beneficiary: "", amount: "", tranches: "" } ]
-    // The rows above are changed in place while typing (a new array would rebuild the fields under
-    // the cursor, one character at a time); these counts rebuild them only on add and remove.
+    // The tranches above are changed in place while typing (a new array would rebuild the fields
+    // under the cursor, one character at a time); this count rebuilds them only on add and remove.
     property int trancheCount: 1
-    property int rowCount: 1
     property var payee: null                   // the payout box, checked: {ok, text} or null
 
     // ── Derived ─────────────────────────────────────────────────────────────────────
@@ -88,7 +82,6 @@ Item {
         return s.mine.creator || s.mine.cancel_authority || s.mine.milestone_authority })
     readonly property var selected: findById(recipientSchedules, recipientId)
     readonly property var publicAccounts: accounts.filter(function(a) { return !a["private"] })
-    readonly property var privateAccounts: accounts.filter(function(a) { return a["private"] })
     readonly property string networkName: info && info.network && info.network.name ? info.network.name : ""
     readonly property string firstAccount: accounts.length ? accounts[0].base58 : ""
     readonly property bool guideDone: info !== null && firstAccount !== ""
@@ -133,14 +126,14 @@ Item {
     /// Where Names Wallet stands (installed and open, on our network, which accounts it gave),
     /// then the vesting module is told the accounts and the chain is read.
     function readNames() {
-        namesWallet.check({ chain: info && info.network ? info.network.chain_id : "" }, function(w) {
+        wallet.check({ chain: info && info.network ? info.network.chain_id : "" }, function(w) {
             if (w.state !== "connected") { loading = false; return }
             namesAccountsRead(w.accounts)
         })
     }
 
     function namesAccountsRead(accounts) {
-        namesWallet.balances(function(b) {
+        wallet.balances(function(b) {
             call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, b))], function() { readChain() })
         }, function() {
             call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, []))], function() { readChain() })
@@ -152,12 +145,12 @@ Item {
     /// brings them back once they answer.
     function connectNames() {
         say("")
-        namesWallet.connect("To show your vesting schedules and claim what has vested to you", {}, {
+        wallet.connect("To show your vesting schedules and claim what has vested to you", {}, {
             waiting: function(v) { root.accessRequest = v },
             done: function(v) {
                 root.accessRequest = null
                 if (v.state === "approved") {
-                    if (namesWallet.status === "connected") namesAccountsRead(namesWallet.accounts)
+                    if (wallet.status === "connected") namesAccountsRead(wallet.accounts)
                     else loading = false
                     say("Connected.", false, Logic.nextLine("connect"))
                 } else say(Logic.requestLine(v, "the connection"), true)
@@ -168,7 +161,8 @@ Item {
 
     // ── Reading ─────────────────────────────────────────────────────────────────────
 
-    /// The vesting module's settings, then the signer: Names Wallet (default) or a wallet folder.
+    /// The vesting module's settings, then the wallet. Vest signs only through the wallet: a
+    /// wallet-folder signer saved by an older Vest is switched off once.
     function refresh() {
         loading = true
         call("settings", [], function(r) {
@@ -176,8 +170,7 @@ Item {
             info = r
             fillSettings(r)
             if (r.signer === "wallet") {
-                if (!r.connected && !String((r.settings || {}).wallet_dir || "").trim()) { loading = false; return }
-                readChain()
+                call("configure", [JSON.stringify({ signer: "names" })], function(again) { if (again.network) info = again; readNames() }, 60000)
                 return
             }
             readNames()
@@ -205,7 +198,6 @@ Item {
 
     function fillSettings(r) {
         var s = r.settings || {}
-        walletField.text = s.wallet_dir || ""
         networkFileField.text = s.network_file || ""
         rpcField.text = s.rpc || ""
         chainField.text = s.chain_id || ""
@@ -223,19 +215,6 @@ Item {
         nextLine = bad ? "" : (next || "")
         resultDetail = bad ? lastDetail : ""
         lastDetail = ""
-    }
-
-    /// A write through the vesting module (wallet-folder mode).
-    function write(what, method, args, done, patience) {
-        say("")
-        busy = true
-        workingOn = what
-        call(method, args, function(r) {
-            busy = false
-            workingOn = ""
-            done(r)
-            refresh()
-        }, patience || 300000)
     }
 
     function copy(text, what) {
@@ -260,23 +239,20 @@ Item {
 
     // ── Settings ────────────────────────────────────────────────────────────────────
 
-    function saveSettings(signer) {
+    function saveNetwork() {
         say("")
         busy = true
         workingOn = "settings"
         var patch = {
-            signer: signer, wallet_dir: walletField.text.trim(), network_file: networkFileField.text.trim(),
-            rpc: rpcField.text.trim(), chain_id: chainField.text.trim(), program: programField.text.trim(),
-            token_program: tokenProgramField.text.trim(), lns_registry: lnsField.text.trim(),
-            clock_elf: clockField.text.trim()
+            network_file: networkFileField.text.trim(), rpc: rpcField.text.trim(), chain_id: chainField.text.trim(),
+            program: programField.text.trim(), token_program: tokenProgramField.text.trim(),
+            lns_registry: lnsField.text.trim(), clock_elf: clockField.text.trim()
         }
-        if (passwordField.text !== "") patch.password = passwordField.text
         call("configure", [JSON.stringify(patch)], function(r) {
             busy = false
             workingOn = ""
-            passwordField.text = ""
             if (r.network) info = r
-            if (r.ok) { say(signer === "wallet" ? "Vest now signs with the wallet folder." : "Vest now uses Names Wallet."); tab = "receive" }
+            if (r.ok) say("Network settings saved.")
             else say(r.error, true)
             refresh()
         }, 60000)
@@ -307,109 +283,70 @@ Item {
     }
     onTabChanged: if (tab !== "settings") guideRole = tab === "pay" ? "pay" : "receive"
 
-    function chooseKind(kind) {
-        destKind = kind
-        destAccount = kind === "private" && privateAccounts.length ? privateAccounts[0].id : ""
-    }
-
-    /// Names Wallet: the module builds the claim call; the person sees it here, then approves it
-    /// in Names. A wallet folder: the module simulates the claim for its fee.
+    /// The module builds the claim call; the person sees it here, then approves it in their
+    /// wallet. Claims go to the schedule's (public) beneficiary account.
     function beginClaim() {
         var s = selected
         if (!s) return
         say("")
         busy = true
         workingOn = "summary"
-        if (!walletMode) {
-            call("claim_call", [String(s.id)], function(r) {
-                busy = false
-                workingOn = ""
-                if (!r.ok) { say(r.error, true); return }
-                confirm = { id: String(s.id), names: r, amountDisplay: r.amount_display, isPrivate: false,
-                            destAccount: s.beneficiary, fee: { ok: true, message: "Names Wallet shows the network fee before you approve; it is paid from this account." } }
-            }, 120000)
-            return
-        }
-        var isPrivate = destKind === "private"
-        if (isPrivate && destAccount === "") { busy = false; workingOn = ""; say("Choose one of your private accounts.", true); return }
-        call("pre_claim_summary", [String(s.id), isPrivate ? destAccount : ""], function(r) {
+        call("claim_call", [String(s.id)], function(r) {
             busy = false
             workingOn = ""
-            if (!r.ok) { say("Couldn't prepare the claim: " + r.error, true); return }
-            var sum = r.summary || {}
-            if (!Logic.above(sum.claimable || "0", "0")) { say(Logic.nothingClaimable(s, viewTime())); return }
-            confirm = {
-                id: String(s.id), isPrivate: isPrivate,
-                amountDisplay: sum.claimable_display, feeDisplay: sum.estimated_fee_display,
-                destAccount: isPrivate ? destAccount : s.beneficiary,
-                fee: Logic.feeCheck(sum), privacy: isPrivate ? Logic.privacyDisclosure() : null
-            }
+            if (!r.ok) { say(r.error, true); return }
+            confirm = { id: String(s.id), names: r, amountDisplay: r.amount_display,
+                        destAccount: s.beneficiary, fee: { ok: true, message: "Names Wallet shows the network fee before you approve; it is paid from this account." } }
         }, 120000)
     }
 
     function confirmClaim() {
         if (!confirm || !confirm.fee.ok) return
         var c = confirm
-        if (c.names) {
-            busy = true
-            workingOn = "claim"
-            var shown = function(v) { v.amountDisplay = c.amountDisplay; root.claimRequest = v }
-            namesWallet.proposeCall(c.names.program, c.names.accounts_json, c.names.instruction_hex, c.names.summary, {
-                sent: function(v, watch) { root.claimWatch = watch; shown(v) },
-                update: shown,
-                done: function(v) {
-                    v.amountDisplay = c.amountDisplay
-                    root.busy = false
-                    root.workingOn = ""
-                    root.claimRequest = null
-                    root.claimWatch = null
-                    root.confirm = null
-                    if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · tx " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
-                    else root.say(Logic.requestLine(v, "the claim"), v.state === "failed")
-                    root.refresh()
-                },
-                failed: function(r) { root.claimRequest = null; root.claimWatch = null; busy = false; workingOn = ""; say(r.error, true) }
-            })
-            return
-        }
-        if (c.isPrivate) say("Proving the private claim on this computer; this takes a few minutes.")
-        write("claim", c.isPrivate ? "claim_private" : "claim_public", c.isPrivate ? [c.id, c.destAccount] : [c.id], function(r) {
-            confirm = null
-            if (!r.ok) { say("The claim didn't go through: " + r.error, true); return }
-            say(Logic.claimLineDisplay(r.amount_display, Logic.labelled(c.destAccount, root.names), r.tx, c.isPrivate), false, Logic.nextLine("claim"))
-        }, c.isPrivate ? 3600000 : 300000)
+        busy = true
+        workingOn = "claim"
+        var shown = function(v) { v.amountDisplay = c.amountDisplay; root.claimRequest = v }
+        wallet.proposeCall(c.names.program, c.names.accounts_json, c.names.instruction_hex, c.names.summary, {
+            sent: function(v, watch) { root.claimWatch = watch; shown(v) },
+            update: shown,
+            done: function(v) {
+                v.amountDisplay = c.amountDisplay
+                root.busy = false
+                root.workingOn = ""
+                root.claimRequest = null
+                root.claimWatch = null
+                root.confirm = null
+                if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · tx " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
+                else root.say(Logic.requestLine(v, "the claim"), v.state === "failed")
+                root.refresh()
+            },
+            failed: function(r) { root.claimRequest = null; root.claimWatch = null; busy = false; workingOn = ""; say(r.error, true) }
+        })
     }
 
     function withdrawClaim() {
-        if (claimRequest) namesWallet.withdraw(claimRequest.request, function() {}, function(r) { say(r.error, true) })
+        if (claimRequest) wallet.withdraw(claimRequest.request, function() {}, function(r) { say(r.error, true) })
     }
 
     function doTransfer(id, target) {
         var typed = Logic.accountInput(target)
         if (!typed.ok) { say("Enter the new beneficiary's address or LNS name.", true); return }
-        if (!walletMode) {
-            namesWrite("transfer", "transfer_call", [String(id), typed.account], function() {
-                transferField.text = ""
-                say("Schedule " + id + " now goes to " + typed.account + ".", false, Logic.nextLine("transfer"))
-            })
-            return
-        }
-        write("transfer", "transfer_beneficiary", [String(id), typed.account], function(r) {
-            if (!r.ok) { say(r.error, true); return }
+        namesWrite("transfer", "transfer_call", [String(id), typed.account], function() {
             transferField.text = ""
-            say("Schedule " + id + " now belongs to " + (r.name ? r.name : Logic.short(r.beneficiary)) + ".", false, Logic.nextLine("transfer"))
+            say("Schedule " + id + " now goes to " + typed.account + ".", false, Logic.nextLine("transfer"))
         })
     }
 
     // ── Paying out ──────────────────────────────────────────────────────────────────
 
+    /// Vest pays out LEZ (the wallet can't approve a token schedule yet).
     function amountOf(text) {
-        return Logic.isNative(tokenField.text) ? Logic.toBase(text) : String(text).trim()
+        return Logic.toBase(text)
     }
 
     function sharedParams() {
         return {
-            kind: cKind, token: tokenField.text.trim() || "LEZ",
+            kind: cKind, token: "LEZ",
             start: Logic.parseDate(startField.text), cliff: Logic.parseDate(cliffField.text), end: Logic.parseDate(endField.text),
             cancelable: cCancelable, transferable: cTransferable,
             cancelAuthority: cancelAuthField.text.trim(), milestoneAuthority: milestoneAuthField.text.trim()
@@ -426,7 +363,7 @@ Item {
         call(method, args, function(r) {
             if (!r.ok) { busy = false; workingOn = ""; say(r.error, true); return }
             var thing = Logic.writeWhat(what)
-            namesWallet.proposeCall(r.program, r.accounts_json, r.instruction_hex, r.summary, {
+            wallet.proposeCall(r.program, r.accounts_json, r.instruction_hex, r.summary, {
                 sent: function(v) {
                     root.writeRequest = { request: v.request, built: r, done: done, what: thing }
                     root.say("In Names Wallet, choose " + Logic.labelled(r.caller, root.names) + " and approve. You come back here after.")
@@ -451,8 +388,8 @@ Item {
         var t = beneficiaryField.text.trim()
         if (t === "") { payee = null; return }
         payee = { ok: false, checking: true, text: "Checking " + t + "…" }
-        if (!walletMode && namesState === "connected" && Logic.accountKind(t) === "name") {
-            namesWallet.resolve(t, function(r) {
+        if (namesState === "connected" && Logic.accountKind(t) === "name") {
+            wallet.resolve(t, function(r) {
                 if (beneficiaryField.text.trim() !== t) return
                 payee = Logic.payeeFromNames(t, r)
             })
@@ -468,56 +405,25 @@ Item {
 
     function doCreate() {
         if (cCreator === "") { say("Choose which of your accounts pays.", true); return }
-        if (!root.batchMode && root.payee && !root.payee.ok && !root.payee.checking) { say(root.payee.text, true); return }
+        if (root.payee && !root.payee.ok && !root.payee.checking) { say(root.payee.text, true); return }
         var p = sharedParams()
         p.beneficiary = beneficiaryField.text.trim()
         // A name Names Wallet looked up: the schedule is for the account it found.
-        var found = !walletMode ? Logic.payeeAccount(root.payee, p.beneficiary) : ""
+        var found = Logic.payeeAccount(root.payee, p.beneficiary)
         if (found !== "") p.beneficiary = found
         p.amount = amountOf(amountField.text)
         p.tranches = cKind === "milestone" ? cTranches.map(amountOf) : []
         var v = Logic.validateCreate(p)
         if (!v.ok) { say(v.errors[0], true); return }
-        if (!walletMode) {
-            var looked = found !== "" ? root.payee.resolved : []
-            namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
-                justCreated = true
-                call("import_schedule", [built.schedule_address], function(imp) {
-                    var id = imp.ok ? imp.id : ""
-                    say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
-                        false, Logic.nextLine("create", { id: id }))
-                    refresh()
-                }, 60000)
-            })
-            return
-        }
-        write("create", "create", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(r) {
-            if (!r.ok) { say(r.error, true); return }
+        var looked = found !== "" ? root.payee.resolved : []
+        namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
             justCreated = true
-            say(Logic.resolvedLines(r.resolved).concat([Logic.createLine(r.id)]).join(" "), false, Logic.nextLine("create", { id: r.id }))
-        })
-    }
-
-    function doBatch() {
-        if (cCreator === "") { say("Choose which of your accounts pays.", true); return }
-        var shared = sharedParams()
-        var rows = bRows.map(function(row) {
-            return { beneficiary: row.beneficiary.trim(), amount: amountOf(row.amount),
-                     tranches: Logic.parseTrancheText(row.tranches).map(amountOf).join(",") }
-        })
-        var v = Logic.validateBatch(Object.assign({ rows: rows }, shared))
-        if (!v.ok) { say(v.errors[0], true); return }
-        var params = rows.map(function(r) {
-            var p = Object.assign({}, shared)
-            p.beneficiary = r.beneficiary
-            p.amount = r.amount
-            p.tranches = shared.kind === "milestone" ? Logic.parseTrancheText(r.tranches) : []
-            return Logic.toCreateRow(p, cCreator)
-        })
-        write("batch", "create_batch", [JSON.stringify(params)], function(r) {
-            if (!r.ok) { say(r.error, true); return }
-            justCreated = true
-            say(Logic.resolvedLines(r.resolved).concat([Logic.batchLine((r.ids || []).length)]).join(" "), false, Logic.nextLine("batch"))
+            call("import_schedule", [built.schedule_address], function(imp) {
+                var id = imp.ok ? imp.id : ""
+                say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
+                    false, Logic.nextLine("create", { id: id }))
+                refresh()
+            }, 60000)
         })
     }
 
@@ -526,39 +432,19 @@ Item {
     function doGrave() {
         var k = sheet.kind, s = sheet.schedule
         sheet = null
-        if (!walletMode) {
-            if (k === "cancel")
-                namesWrite("cancel:" + s.id, "cancel_call", [String(s.id)], function(built) {
-                    say("Cancelled schedule " + s.id + ". " + built.amount_display + " went back to the creator.", false, Logic.nextLine("cancel"))
-                })
-            else
-                namesWrite("irrevocable:" + s.id, "irrevocable_call", [String(s.id)], function() {
-                    say("Schedule " + s.id + " is now permanent.", false, Logic.nextLine("irrevocable"))
-                })
-            return
-        }
         if (k === "cancel")
-            write("cancel:" + s.id, "cancel", [String(s.id)], function(r) {
-                if (!r.ok) { say(r.error, true); return }
-                say("Cancelled schedule " + s.id + ". " + r.refund_display + " went back to the creator.", false, Logic.nextLine("cancel"))
+            namesWrite("cancel:" + s.id, "cancel_call", [String(s.id)], function(built) {
+                say("Cancelled schedule " + s.id + ". " + built.amount_display + " went back to the creator.", false, Logic.nextLine("cancel"))
             })
         else
-            write("irrevocable:" + s.id, "make_irrevocable", [String(s.id)], function(r) {
-                if (!r.ok) { say(r.error, true); return }
+            namesWrite("irrevocable:" + s.id, "irrevocable_call", [String(s.id)], function() {
                 say("Schedule " + s.id + " is now permanent.", false, Logic.nextLine("irrevocable"))
             })
     }
 
     function doSignal(s, index) {
-        if (!walletMode) {
-            namesWrite("signal:" + s.id + ":" + index, "signal_call", [String(s.id), String(index)], function(built) {
-                say("Unlocked milestone " + (index + 1) + " of schedule " + s.id + ": " + built.amount_display + ".", false, Logic.nextLine("signal"))
-            })
-            return
-        }
-        write("signal:" + s.id + ":" + index, "signal_milestone", [String(s.id), String(index)], function(r) {
-            if (!r.ok) { say(r.error, true); return }
-            say("Unlocked milestone " + (index + 1) + " of schedule " + s.id + ": " + r.amount_display + ".", false, Logic.nextLine("signal"))
+        namesWrite("signal:" + s.id + ":" + index, "signal_call", [String(s.id), String(index)], function(built) {
+            say("Unlocked milestone " + (index + 1) + " of schedule " + s.id + ": " + built.amount_display + ".", false, Logic.nextLine("signal"))
         })
     }
 
@@ -594,32 +480,40 @@ Item {
                 Link { look: root.look; Layout.alignment: Qt.AlignTop; visible: root.connected; text: root.showGuide ? "Hide steps" : "Steps"; onPressed: root.showGuide ? root.finishGuide() : root.guideOpen = true }
             }
 
-            // ── Names Wallet: missing, another network, not connected yet, asking ─────
+            // ── The wallet: none, several, not running, another network, asking ──────
             Card {
-                visible: !root.walletMode && root.namesState === "missing" && root.tab !== "settings"
+                visible: (root.namesState === "missing" || root.namesState === "none") && root.tab !== "settings"
                 Heading { text: "Vest needs Names Wallet" }
-                Body { text: Logic.NAMES_MISSING }
-                Body { text: "No Names Wallet? A wallet folder works too: Settings, Advanced." }
-                Action { look: root.look; label: "Check again"; onPressed: root.refresh() }
-            }
-            Card {
-                visible: !root.walletMode && root.namesState === "otherZone" && root.tab !== "settings"
-                Heading { text: "Switch Names Wallet to the bridge test network" }
                 Body { text: root.namesProblem }
                 Action { look: root.look; label: "Check again"; onPressed: root.refresh() }
             }
             Card {
-                visible: root.walletMode && !root.chainOpen && root.tab !== "settings" && Logic.connectProblem(root.info) !== ""
-                Heading { text: "Not connected" }
-                Body { text: Logic.connectProblem(root.info); color: look.alarm }
-                Action { look: root.look; label: "Open settings"; onPressed: root.tab = "settings" }
+                visible: root.namesState === "choose" && root.tab !== "settings"
+                Heading { text: "Which wallet should Vest use?" }
+                Body { text: "More than one wallet is installed. Vest remembers your choice; you can change it in Settings." }
+                Repeater {
+                    model: root.namesState === "choose" ? wallet.wallets : []
+                    delegate: Choice {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        label: Logic.clean(modelData.display_name)
+                        detail: Logic.clean(modelData.module)
+                        chosen: false
+                        onPressed: wallet.chooseWallet(modelData.module)
+                    }
+                }
             }
-
+            Card {
+                visible: root.namesState === "otherZone" && root.tab !== "settings"
+                Heading { text: "Switch Names Wallet to the bridge test network" }
+                Body { text: root.namesProblem }
+                Action { look: root.look; label: "Check again"; onPressed: root.refresh() }
+            }
             // ── Steps: what to do, one at a time ─────────────────────────────────────
             // The first screen: pick what you came to do, then numbered steps. The step you are
             // on says what to do and holds its button (step 1: connect Names Wallet).
             Card {
-                visible: root.showGuide && root.namesState !== "missing" && root.namesState !== "otherZone"
+                visible: root.showGuide && ["missing", "none", "choose", "otherZone"].indexOf(root.namesState) < 0
                 Heading { text: "What do you want to do?" }
                 RowLayout {
                     spacing: 8
@@ -664,10 +558,10 @@ Item {
                             }
                             Body {
                                 visible: step.now && step.modelData.n === 2 && root.guideRole === "pay" && !root.canWrite && root.connected
-                                text: "Not with Names Wallet yet: it can approve claims, but not a new schedule. To pay out today, use a wallet folder (Settings, Advanced)."
+                                text: Logic.NAMES_CANT_PAY
                             }
                             RowLayout {
-                                visible: step.now && step.modelData.n === 1 && !root.walletMode
+                                visible: step.now && step.modelData.n === 1
                                 spacing: 16
                                 Action {
                                     look: root.look; strong: true
@@ -688,7 +582,7 @@ Item {
             }
 
             RowLayout {
-                visible: root.connected || root.tab === "settings" || root.walletMode
+                visible: root.connected || root.tab === "settings"
                 Layout.fillWidth: true
                 spacing: 8
                 Tab { label: "Receive"; active: root.tab === "receive"; onPressed: root.tab = "receive" }
@@ -750,25 +644,7 @@ Item {
                     Layout.topMargin: 8
                     spacing: 10
                     Body { text: "A public claim pays your account in the open: anyone can see the amount and where it went." }
-                    Body { visible: root.walletMode; text: "A private claim pays a private account of yours: the amount is public, but where the tokens go after that stays hidden. It is proven on this computer and takes a few minutes." }
-                    Body { visible: !root.walletMode; text: "Private claims need Names Wallet to sign a public claim into a private account, which it can't yet: claims go to your public account for now." }
-                    RowLayout {
-                        visible: root.walletMode
-                        spacing: 8
-                        ChoiceInline { label: "Public account"; chosen: root.destKind === "public"; onPressed: root.chooseKind("public") }
-                        ChoiceInline { label: "Private account"; chosen: root.destKind === "private"; onPressed: root.chooseKind("private") }
-                    }
-                    Repeater {
-                        model: root.walletMode && root.destKind === "private" ? root.privateAccounts : []
-                        delegate: Choice {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            label: Logic.short(modelData.base58)
-                            detail: modelData.balance_display
-                            chosen: root.destAccount === modelData.id
-                            onPressed: root.destAccount = modelData.id
-                        }
-                    }
+                    Body { text: "Private claims need Names Wallet to sign a public claim into a private account, which it can't yet: claims go to your public account for now." }
                     Action {
                         look: root.look; strong: true; changes: true; busy: root.busy
                         label: "Check claim"; busyLabel: "Checking…"; working: root.workingOn === "summary"
@@ -779,9 +655,8 @@ Item {
                 Sheet {
                     visible: root.confirm !== null
                     Heading { text: root.confirm ? "Claim " + root.confirm.amountDisplay + "?" : "" }
-                    FactRow { look: root.look; key: "To"; value: root.confirm ? Logic.labelled(root.confirm.destAccount, root.names) + (root.confirm.isPrivate ? " (private)" : " (public)") : "" }
-                    FactRow { look: root.look; key: "Network fee"; value: root.confirm ? (root.confirm.feeDisplay || "shown by Names Wallet before you approve") : "" }
-                    Body { visible: !!(root.confirm && root.confirm.privacy); text: root.confirm && root.confirm.privacy ? root.confirm.privacy.text : "" }
+                    FactRow { look: root.look; key: "To"; value: root.confirm ? Logic.labelled(root.confirm.destAccount, root.names) + " (public)" : "" }
+                    FactRow { look: root.look; key: "Network fee"; value: "shown by Names Wallet before you approve" }
                     Body { text: root.confirm ? root.confirm.fee.message : ""; color: root.confirm && !root.confirm.fee.ok ? look.alarm : look.dim }
                     Body { visible: root.claimRequest !== null; text: Logic.requestLine(root.claimRequest, "the claim"); color: look.ink }
                     RowLayout {
@@ -789,8 +664,8 @@ Item {
                         Action {
                             look: root.look; strong: true; changes: true; busy: root.busy
                             enabledNow: !!(root.confirm && root.confirm.fee.ok)
-                            label: root.confirm && root.confirm.names ? "Claim in Names Wallet" : "Claim " + (root.confirm ? root.confirm.amountDisplay : "")
-                            busyLabel: root.claimRequest !== null ? "Waiting for Names…" : "Claiming…"; working: root.workingOn === "claim"
+                            label: "Claim in Names Wallet"
+                            busyLabel: "Waiting for Names…"; working: root.workingOn === "claim"
                             onPressed: root.confirmClaim()
                         }
                         Action { look: root.look; label: "Don't claim"; visible: root.workingOn !== "claim"; onPressed: root.confirm = null }
@@ -849,11 +724,10 @@ Item {
                 visible: root.tab === "pay" && !root.canWrite && root.connected
                 Heading { text: "Paying out with Names Wallet: not yet" }
                 Body { text: Logic.NAMES_CANT_PAY }
-                Link { look: root.look; text: "Use a wallet folder instead"; onPressed: root.tab = "settings" }
             }
 
             Card {
-                visible: root.tab === "pay" && (root.connected || root.walletMode)
+                visible: root.tab === "pay" && root.connected
                 Heading { text: "New schedule" }
                 Body { text: "Lock tokens for someone and let them unlock over time. Example: 1,000 LEZ, nothing for a year, then unlocking evenly over the next three years." }
                 Label { text: "Paid from" }
@@ -891,14 +765,7 @@ Item {
                     Field { id: cliffField; look: root.look; Layout.preferredWidth: 1; visible: root.cKind === "cliff-linear"; Layout.fillWidth: true; hint: "2027-12-01" }
                     Field { id: endField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "2030-12-01" }
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
-                    ChoiceInline { label: "One person"; chosen: !root.batchMode; onPressed: root.batchMode = false }
-                    ChoiceInline { label: "Several people, one transaction"; chosen: root.batchMode; onPressed: root.batchMode = true }
-                }
                 ColumnLayout {
-                    visible: !root.batchMode
                     Layout.fillWidth: true
                     spacing: 6
                     Label { text: "Who receives it" }
@@ -915,7 +782,7 @@ Item {
                         wrapMode: Text.Wrap
                     }
                     Label { visible: root.cKind !== "milestone"; text: "How much" }
-                    Field { id: amountField; look: root.look; visible: root.cKind !== "milestone"; Layout.fillWidth: true; hint: Logic.isNative(tokenField.text) ? "LEZ, e.g. 1000" : "In the token's smallest unit" }
+                    Field { id: amountField; look: root.look; visible: root.cKind !== "milestone"; Layout.fillWidth: true; hint: "LEZ, e.g. 1000" }
                     Repeater {
                         model: root.cKind === "milestone" ? root.trancheCount : 0
                         delegate: RowLayout {
@@ -925,7 +792,7 @@ Item {
                             Field {
                                 look: root.look
                                 Layout.fillWidth: true
-                                hint: "Milestone " + (index + 1) + (Logic.isNative(tokenField.text) ? ": LEZ" : "")
+                                hint: "Milestone " + (index + 1) + ": LEZ"
                                 text: root.cTranches[index]
                                 onTextChanged: root.cTranches[index] = text
                             }
@@ -934,38 +801,7 @@ Item {
                     }
                     Link { look: root.look; visible: root.cKind === "milestone"; text: "Add a milestone"; onPressed: { root.cTranches.push(""); root.trancheCount = root.cTranches.length } }
                 }
-                ColumnLayout {
-                    visible: root.batchMode
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Body { text: root.cKind === "milestone" ? "One row per person: their address or LNS name, and their milestone amounts separated by commas." : "One row per person: their address or LNS name, and how much. Up to 140 people in one transaction." }
-                    Repeater {
-                        model: root.rowCount
-                        delegate: RowLayout {
-                            required property int index
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Field {
-                                look: root.look
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 3
-                                hint: "Person " + (index + 1) + ": address or LNS name"
-                                text: root.bRows[index].beneficiary
-                                onTextChanged: root.bRows[index].beneficiary = text
-                            }
-                            Field {
-                                look: root.look
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 2
-                                hint: root.cKind === "milestone" ? "e.g. 400, 600" : "LEZ"
-                                text: root.cKind === "milestone" ? root.bRows[index].tranches : root.bRows[index].amount
-                                onTextChanged: root.bRows[index][root.cKind === "milestone" ? "tranches" : "amount"] = text
-                            }
-                            Link { look: root.look; visible: root.rowCount > 1; text: "Remove"; onPressed: { root.bRows.splice(index, 1); root.rowCount = root.bRows.length } }
-                        }
-                    }
-                    Link { look: root.look; text: "Add a person"; onPressed: { root.bRows.push({ beneficiary: "", amount: "", tranches: "" }); root.rowCount = root.bRows.length } }
-                }
+                Body { text: "One person per schedule, in LEZ. Several people in one transaction, and schedules of other tokens, aren't offered: Names Wallet can't approve them yet." }
 
                 Tick { look: root.look; checked: root.cCancelable; text: "You can cancel it later"; onToggled: root.cCancelable = !root.cCancelable }
                 Body { text: "Cancelable: until you make it permanent, you can stop it. What hasn't unlocked comes back to you; what has stays theirs." }
@@ -975,9 +811,7 @@ Item {
                 TechDetails {
                     look: root.look
                     title: "More options"
-                    summary: "Another token; someone else who may cancel or unlock milestones"
-                    Label { text: "Token" }
-                    Field { id: tokenField; look: root.look; Layout.fillWidth: true; text: "LEZ"; hint: "LEZ, or a token's definition address" }
+                    summary: "Someone else who may cancel or unlock milestones"
                     Body { text: "By default you decide: you can cancel, and you say when a milestone is reached. Name someone else here to give them that job instead, for example a board or a lawyer." }
                     Label { text: "Who may cancel (empty: you)" }
                     Field { id: cancelAuthField; look: root.look; Layout.fillWidth: true; hint: "Address or LNS name" }
@@ -986,20 +820,17 @@ Item {
                 }
 
                 Body {
-                    visible: !root.walletMode
                     color: look.ink
                     text: !root.namesCanCall
-                        ? "Create needs Names Wallet 0.18 or later, which can sign a new schedule. Update Names, or use a wallet folder: Settings, Advanced."
-                        : root.batchMode
-                            ? "Several people in one transaction needs a wallet folder for now (Settings, Advanced). One person at a time works with Names Wallet."
-                            : "Names Wallet opens with the schedule: choose the account that pays and approve. You come back here after."
+                        ? "Create needs Names Wallet 0.18 or later, which can sign a new schedule. Update Names, then come back."
+                        : "Names Wallet opens with the schedule: choose the account that pays and approve. You come back here after."
                 }
                 Action {
                     look: root.look; strong: true; changes: true; busy: root.busy
-                    enabledNow: root.walletMode || (root.namesCanCall && !root.batchMode)
-                    label: root.batchMode ? "Create " + root.rowCount + " schedules" : "Create schedule"
-                    busyLabel: "Creating…"; working: root.workingOn === "create" || root.workingOn === "batch"
-                    onPressed: root.batchMode ? root.doBatch() : root.doCreate()
+                    enabledNow: root.namesCanCall
+                    label: "Create schedule"
+                    busyLabel: "Creating…"; working: root.workingOn === "create"
+                    onPressed: root.doCreate()
                 }
             }
 
@@ -1061,28 +892,10 @@ Item {
             Card {
                 visible: root.tab === "settings"
                 Heading { text: "Signing" }
-                Body { text: root.walletMode ? "Vest signs with the wallet folder below." : "Vest signs through Names Wallet: you approve every payment and claim in the Names app." }
-                Action { look: root.look; visible: root.walletMode; strong: true; label: "Use Names Wallet instead"; changes: true; busy: root.busy; onPressed: root.saveSettings("names") }
-                Link { look: root.look; visible: !root.walletMode && root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: namesWallet.disconnect(function() { root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
-            }
-
-            TechDetails {
-                visible: root.tab === "settings"
-                look: root.look
-                title: "Advanced: a wallet folder instead of Names Wallet"
-                summary: root.walletMode ? "In use" : "For people without Names Wallet"
-                open: root.walletMode
-                Body { text: "A wallet folder holds wallet_config.json and storage.json, made with the LEZ wallet's own command line. Vest then signs itself, and can create and manage schedules, which Names Wallet can't approve yet." }
-                Label { text: "Wallet folder" }
-                Field { id: walletField; look: root.look; Layout.fillWidth: true; code: true; hint: "e.g. ~/lez-wallet" }
-                Label { text: "Its password (only if it has one; kept until Basecamp closes)" }
-                Field { id: passwordField; look: root.look; Layout.fillWidth: true; Component.onCompleted: children[0].echoMode = TextInput.Password }
-                Body { visible: root.walletMode && Logic.connectProblem(root.info) !== ""; text: Logic.connectProblem(root.info); color: look.alarm }
-                Action {
-                    look: root.look; changes: true; busy: root.busy
-                    label: "Sign with this wallet folder"; busyLabel: "Connecting…"; working: root.workingOn === "settings"
-                    onPressed: root.saveSettings("wallet")
-                }
+                Body { text: "Vest signs through Names Wallet: you approve every payment and claim in the Names app. Vest has no signer of its own." }
+                FactRow { look: root.look; visible: wallet.current !== null; key: "Wallet"; value: wallet.current ? Logic.clean(wallet.current.display_name) + " (" + Logic.clean(wallet.current.module) + ")" : "" }
+                Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
+                Link { look: root.look; visible: wallet.wallets.length > 1; text: "Use another wallet"; onPressed: { wallet.forgetWallet(); root.refresh() } }
             }
 
             TechDetails {
@@ -1111,7 +924,7 @@ Item {
                 Field { id: lnsField; look: root.look; Layout.fillWidth: true; code: true }
                 Label { text: "Clock program file (only if the network doesn't serve it)" }
                 Field { id: clockField; look: root.look; Layout.fillWidth: true; code: true }
-                Action { look: root.look; label: "Save network settings"; changes: true; busy: root.busy; onPressed: root.saveSettings(root.walletMode ? "wallet" : "names") }
+                Action { look: root.look; label: "Save network settings"; changes: true; busy: root.busy; onPressed: root.saveNetwork() }
             }
 
             // The result of the last step, and what happens next.

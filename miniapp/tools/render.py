@@ -42,7 +42,7 @@ LIST = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
              beneficiary=OTHER, signalled=[True, False]),
 ]}
 SETTINGS = {"ok": True, "connected": True, "status": "ready", "chain": True, "has_password": False, "data_dir": "~/Library/Application Support/Logos/vesting",
-            "settings": {"wallet_dir": "~/lez-wallet", "network_file": "", "rpc": "", "chain_id": "", "program": "", "token_program": "", "lns_registry": "", "clock_elf": ""},
+            "settings": {"network_file": "", "rpc": "", "chain_id": "", "program": "", "token_program": "", "lns_registry": "", "clock_elf": ""},
             "network": {"name": "Bridge test network", "source": "built-in", "rpc": "https://lez.nameswallet.app/",
                         "chain_id": "2da7f7dfb6e51a28c942ea80391aa518253ec515e98d28cb4d83cc9e16ff5374",
                         "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "token_program": "FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz",
@@ -50,14 +50,6 @@ SETTINGS = {"ok": True, "connected": True, "status": "ready", "chain": True, "ha
 ACCOUNTS = {"ok": True, "accounts": [
     {"id": ME, "base58": "2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD", "private": False, "balance": "28431410", "balance_display": "0.02843141 LEZ", "name": "alice"},
     {"id": PRIV, "base58": "3DyBfLzS7f9yJeKHsQ2FoLxNbyAvKMq4QEo1WdLm8vZR", "private": True, "balance": "0", "balance_display": "0 LEZ", "name": None}]}
-
-
-def summary(covered, payer, private):
-    return {"ok": True, "summary": {"schedule": 0, "claimable": "486", "claimable_display": "486 LEZ", "estimated_fee": "11904",
-            "estimated_fee_display": "0.000011904 LEZ", "fee_simulated": True, "fee_payer": payer, "fee_reserve": "23808",
-            "fee_reserve_display": "0.000023808 LEZ", "fee_available": "486" if not covered else "28431410",
-            "fee_available_display": "0.000000486 LEZ" if not covered else "0.02843141 LEZ", "fee_covered": covered,
-            "revert_reason": None, "next_unlock": NOW + 330 * DAY, "destination_kind": "private" if private else "public"}}
 
 
 CANCELLED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
@@ -68,14 +60,17 @@ CANCELLED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
 CLAIMED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
     schedule(0, {"type": "linear", "start": NOW - 9 * DAY, "end": NOW - DAY}, "1000000", "1000000", "0",
              {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True})]}
-WALLET = dict(SETTINGS, signer="wallet")
 FIRST = dict(SETTINGS, connected=False, status="not opened yet", signer="names")
-WRONG = dict(SETTINGS, connected=False, signer="wallet", status="no wallet at ~/lez-wallet")
 NAMES_SETTINGS = dict(SETTINGS, signer="names")
+# A wallet-folder signer saved by an older Vest: switched off at once (configure signer names).
+OLD_WALLET = dict(SETTINGS, signer="wallet")
 CHAIN = SETTINGS["network"]["chain_id"]
 CONFIG = {"zone": {"id": "home", "channel": CHAIN, "home": True}, "features": ["request_access_with"]}
 GRANTED = {"connected": True, "accounts": [{"account": "Public/2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD", "account_kind": "public"}]}
 NOT_GRANTED = {"connected": False, "accounts": []}
+WALLET_ON = {"get_config": dict(CONFIG, features=["call_reads_clock"]), "granted_accounts": GRANTED, "account_balances": []}
+DONE_GUIDE = dict(NAMES_SETTINGS, settings=dict(SETTINGS["settings"], guide_done=["2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"]))
+NAMES_ROW = {"name": "names", "moduleName": "names", "type": "core", "category": "wallet", "displayName": "Names", "version": "0.19.0"}
 CLAIM_CALL = {"ok": True, "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "accounts_json": "[]", "instruction_hex": "05",
               "amount": "31333", "amount_display": lez("31333"), "summary": "Claim", "caller": "Public/2BhK"}
 
@@ -105,14 +100,12 @@ SCENARIOS = {
                       "propose_call": {"request": "cd" * 16, "kind": "call", "state": "pending"},
                       "request_status": {"request": "cd" * 16, "kind": "call", "state": "done", "tx": "c5d782913d8819b009c8d15815697b20a59b71f2568d2cd976165af267b7b8fd"}},
                      "root.beginClaim(); later.start(); scroll.start()"),
-    "recipient-cancelled": ({"settings": WALLET, "list": CANCELLED}, {}, "root.guideOpen = false"),
-    "create-linear": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'linear'; page.contentY = 360"),
-    "create-cliff": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'cliff-linear'; page.contentY = 360"),
-    "create-milestone": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'milestone'; page.contentY = 360"),
-    "payee-ok": ({"settings": WALLET, "resolve_name": {"ok": True, "name": "alice", "account": "11" * 32, "base58": "2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"}}, {},
-                 "root.tab = 'pay'; beneficiaryField.text = 'alice'; root.checkPayee(); page.contentY = 560"),
-    "payee-unknown": ({"settings": WALLET, "resolve_name": {"ok": False, "error": "unknown LNS name: alcie"}}, {},
-                 "root.tab = 'pay'; beneficiaryField.text = 'alcie'; root.checkPayee(); page.contentY = 560"),
+    "recipient-cancelled": ({"settings": DONE_GUIDE, "list": CANCELLED}, WALLET_ON, "root.guideOpen = false"),
+    "create-linear": ({"settings": DONE_GUIDE}, WALLET_ON, "root.tab = 'pay'; root.cKind = 'linear'; page.contentY = 360"),
+    "create-cliff": ({"settings": DONE_GUIDE}, WALLET_ON, "root.tab = 'pay'; root.cKind = 'cliff-linear'; page.contentY = 360"),
+    "create-milestone": ({"settings": DONE_GUIDE}, WALLET_ON, "root.tab = 'pay'; root.cKind = 'milestone'; page.contentY = 360"),
+    "payee-address": ({"settings": DONE_GUIDE, "resolve_name": {"ok": True, "account": "11" * 32, "base58": "2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"}}, WALLET_ON,
+                 "root.tab = 'pay'; beneficiaryField.text = '2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD'; root.checkPayee(); page.contentY = 560"),
     "payee-names": ({"settings": NAMES_SETTINGS}, {"get_config": dict(CONFIG, features=["call_reads_clock"]), "granted_accounts": GRANTED, "account_balances": [],
                      "resolve": {"name": "alice", "display": "alice.lez", "account": "2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD", "forward": None, "lapsed": False}},
                     "root.guideOpen = false; root.tab = 'pay'; beneficiaryField.text = 'alice'; root.checkPayee(); page.contentY = 560"),
@@ -121,9 +114,13 @@ SCENARIOS = {
     "create-names-018": ({"settings": NAMES_SETTINGS}, {"get_config": dict(CONFIG, features=["call_reads_clock"]), "granted_accounts": GRANTED, "account_balances": []},
                          "root.guideOpen = false; root.tab = 'pay'; page.contentY = page.contentHeight - page.height"),
     "create-names": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'pay'"),
-    "confirm-cancel": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.askGrave('cancel', root.mySchedules[0])"),
+    "confirm-cancel": ({"settings": DONE_GUIDE}, WALLET_ON, "root.tab = 'pay'; root.askGrave('cancel', root.mySchedules[0])"),
     "settings": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'settings'"),
-    "wallet-folder-wrong": ({"settings": WRONG}, {}, ""),
+    "old-wallet-folder-setting": ({"settings": OLD_WALLET}, WALLET_ON, ""),
+    "no-wallet": ({"settings": FIRST}, {"__packages": [{"name": "vesting", "type": "core", "category": "finance"}]}, ""),
+    "choose-wallet": ({"settings": FIRST}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]), ""),
+    "chose-other-wallet": ({"settings": DONE_GUIDE}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]),
+                           "wallet.chooseWallet('xwallet'); root.tab = 'settings'"),
 }
 
 BRIDGE = r"""
@@ -135,9 +132,11 @@ BRIDGE = r"""
         }
         function callModule(module, method, args) {
             var answers = %(answers)s
-            if (module === "names") {
-                var na = %(names)s
-                if (na.__missing) return "Module not connected: names"
+            var na = %(names)s
+            if (module === "package_manager")
+                return na.__packages ? JSON.stringify(na.__packages) : ""
+            if (module === "names" || module === "xwallet") {
+                if (na.__missing) return "Module not connected: " + module
                 var v = na[method]
                 return JSON.stringify(JSON.stringify(v === undefined ? { success: false, value: null, error: "not in this scenario" } : { success: true, value: v, error: null }))
             }
