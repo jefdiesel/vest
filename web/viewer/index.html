@@ -17,13 +17,13 @@
   .err { color: #a00; }
 </style>
 <h1>Vesting schedules (read-only)</h1>
-<p class="note">Static viewer on the LEZ 0.4 bridge test network. It only reads chain state; it never signs or sends.</p>
+<p class="note">Static viewer for LEZ 0.4 schedules on the Logos test network. It only reads chain state; it never signs or sends.</p>
 
-<label>RPC URL <input id="rpc" value="https://lez.nameswallet.app/"></label>
-<label>Program id (change if the program is redeployed) <input id="program" value="2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2"></label>
-<label>Schedule account, creator/beneficiary address, or LNS name <input id="input" placeholder="account id or name, e.g. jef05"></label>
-<label>Nonce (optional: derive a schedule from a creator + nonce) <input id="nonce" placeholder="text or up to 32 bytes"></label>
-<button id="go">Read</button>
+<label>Node address <input id="rpc" value="https://lez.nameswallet.app/"></label>
+<label>Vesting program (change if it is redeployed) <input id="program" value="2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2"></label>
+<label>Schedule address, creator address, or LNS name <input id="input" placeholder="address or name, e.g. jef05"></label>
+<label>Schedule label (optional: used with the creator to find it) <input id="nonce" placeholder="a short label"></label>
+<button id="go">Read schedule</button>
 <div id="status"></div>
 <div id="result"></div>
 
@@ -32,7 +32,7 @@
   const button = document.querySelector('#go');
   button.addEventListener('click', async () => {
     button.disabled = true;
-    button.textContent = 'Reading…';
+    button.textContent = 'Reading schedule…';
     document.querySelector('#status').textContent = '';
     document.querySelector('#result').replaceChildren();
     try {
@@ -49,7 +49,7 @@
       document.querySelector('#status').className = 'err';
     } finally {
       button.disabled = false;
-      button.textContent = 'Read';
+      button.textContent = 'Read schedule';
     }
   });
 </script>

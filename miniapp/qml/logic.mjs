@@ -254,14 +254,14 @@ export function nextUnlock(s, now) {
     if (s.kind === "milestone") {
         var sg = s.signalled || [], n = Math.max((s.tranches || []).length, sg.length), i = 0
         while (i < n && sg[i]) i++
-        if (i >= n) return { at: 0, text: "All milestones signalled." }
-        return { at: 0, text: "Next unlock: tranche " + (i + 1) + " — signalled by the creator." }
+        if (i >= n) return { at: 0, text: "All milestones unlocked." }
+        return { at: 0, text: "Next unlock: milestone " + (i + 1) + " — when the creator says it's reached." }
     }
     if (s.kind === "cliff-linear" && cmpDec(now, s.cliff) < 0)
         return { at: num(s.cliff), text: "Cliff on " + dateText(s.cliff) + " — " + inText(num(s.cliff) - now, now) + "." }
     if (cmpDec(now, s.end) < 0)
-        return { at: num(s.end), text: "Fully vested on " + dateText(s.end) + " — " + inText(num(s.end) - now, now) + "." }
-    return { at: 0, text: "Fully vested — nothing left to unlock." }
+        return { at: num(s.end), text: "Fully unlocked on " + dateText(s.end) + " — " + inText(num(s.end) - now, now) + "." }
+    return { at: 0, text: "Fully unlocked — nothing left to unlock." }
 }
 
 // ── Module replies ───────────────────────────────────────────────────────────────────
@@ -352,8 +352,8 @@ export function accountKind(text) {
 /// Why `text` can't be sent to the module as an account (an address or an LNS name), or "".
 export function problemAccount(text) {
     var s = String(text == null ? "" : text).trim()
-    if (s === "") return "Enter an account (hex or base58) or an LNS name."
-    if (accountKind(s) === "") return "That is not an account ID (64 hex or base58) or an LNS name."
+    if (s === "") return "Enter an address or an LNS name."
+    if (accountKind(s) === "") return "That is not an address or an LNS name."
     return ""
 }
 
@@ -401,7 +401,7 @@ export function validateCreate(p) {
     p = p || {}
     var e = []
     if (KINDS.indexOf(p.kind) < 0) e.push("Choose a schedule kind.")
-    if (problemAccount(p.beneficiary) !== "") e.push("Beneficiary: " + problemAccount(p.beneficiary))
+    if (problemAccount(p.beneficiary) !== "") e.push("Who receives it: " + problemAccount(p.beneficiary))
     if (tokenProblem(p.token)) e.push(tokenProblem(p.token))
     if (p.kind !== "milestone") {
         if (!/^\d+$/.test(String(p.amount == null ? "" : p.amount)) || num(p.amount) <= 0) e.push("Amount must be a positive whole number.")
@@ -409,10 +409,10 @@ export function validateCreate(p) {
     }
     if (p.kind === "milestone") {
         var tr = p.tranches || []
-        if (!Array.isArray(tr) || tr.length === 0) e.push("Add at least one milestone tranche.")
+        if (!Array.isArray(tr) || tr.length === 0) e.push("Add at least one milestone amount.")
         else for (var i = 0; i < tr.length; i++)
             if (!/^\d+$/.test(String(tr[i] == null ? "" : tr[i])) || num(tr[i]) <= 0) {
-                e.push("Tranche " + (i + 1) + " must be a positive whole number.")
+                e.push("Milestone " + (i + 1) + " must be a positive whole number.")
                 break
             }
     }
@@ -426,7 +426,7 @@ function tokenProblem(token) {
     var t = String(token == null ? "" : token).trim()
     if (isNative(t)) return ""
     var k = accountKind(t)
-    return k === "hex" || k === "base58" ? "" : "Token must be LEZ or a token definition account (hex or base58)."
+    return k === "hex" || k === "base58" ? "" : "Enter LEZ or a token's address."
 }
 
 function dateProblems(p) {
@@ -483,7 +483,7 @@ export function statusLine(s) {
     s = s || {}
     if (s.cancelled)
         return "Cancelled" + (s.cancelled_at ? " on " + dateText(s.cancelled_at) : "") + ". "
-            + (s.refund_display || "The unvested amount") + " went back to the creator."
+            + (s.refund_display || "The amount still locked") + " went back to the creator."
     if (isFullyClaimed(s)) return "Fully claimed."
     return ""
 }
@@ -499,16 +499,16 @@ export function rowState(s) {
 export function confirmText(kind, s) {
     s = s || {}
     if (kind === "cancel")
-        return "Cancel schedule " + s.id + "? The unvested " + (s.locked_display || "amount") + " goes back to you. This can't be undone."
+        return "Cancel schedule " + s.id + "? The locked amount " + (s.locked_display || "") + " goes back to you. This can't be undone."
     if (kind === "irrevocable")
         return "Make schedule " + s.id + " irrevocable? Nobody can cancel it after this. This can't be undone."
     return ""
 }
 
-/// "Schedule 3 · linear · 1.5 LEZ".
+/// "Schedule 3 · evenly · 1.5 LEZ".
 export function scheduleTitle(s) {
     s = s || {}
-    var kinds = { "linear": "linear", "cliff-linear": "cliff, then linear", "milestone": "milestones" }
+    var kinds = { "linear": "evenly", "cliff-linear": "cliff, then evenly", "milestone": "milestones" }
     return "Schedule " + s.id + " · " + (kinds[s.kind] || s.kind) + " · " + (s.total_display || "")
 }
 
@@ -549,7 +549,7 @@ export const requestLine = SDK.requestLine
 export const requestOpen = SDK.requestOpen
 
 /// What Vest says when Names Wallet is on another network than Vest's.
-export const OTHER_ZONE = "Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names: Settings, Network), then come back."
+export const OTHER_ZONE = "Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names Wallet: Settings, Network), then come back."
 
 /// The `get_config` zone check: "" when Names Wallet is on `chainId`, else what to do.
 export function zoneProblem(config, chainId) {
@@ -610,12 +610,12 @@ export function guideSteps(role, at) {
            "Claim to your public account, or privately",
            "Approve it in Names Wallet"]
     var details = role === "pay"
-        ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in the Names app; Vest never sees a key.",
+        ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Below: the account that pays, the person (address or LNS name), the amount, and when it unlocks.",
            "Names Wallet shows the payment and its fee. Nothing leaves your account until you approve.",
            "They add the schedule in their own Vest with that address or name, then claim as it unlocks.",
            "Cancel stops what hasn't unlocked and returns it to you. Permanent means nobody can cancel."]
-        : ["Names Wallet asks you which of your accounts Vest may see. You approve it in the Names app; Vest never sees a key.",
+        : ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Schedules paid to your accounts show up by themselves. If not, paste the address or LNS name the sender gave you.",
            "Choose a schedule below: it shows what is claimable now, what is still locked, and the next unlock.",
            "Press Check claim. Vest shows the amount and where it goes before anything is sent.",
@@ -666,10 +666,10 @@ export function nextLine(action, info) {
     if (action === "create") return "Schedule " + info.id + " is live. Send them its address or your LNS name so they can find it in Vest."
     if (action === "batch") return "The schedules are live. Send each person their schedule's address or your LNS name."
     if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
-    if (action === "cancel") return "Nothing more unlocks. What had already vested stays theirs to claim."
+    if (action === "cancel") return "Nothing more unlocks. What had already unlocked stays theirs to claim."
     if (action === "irrevocable") return "Nobody can cancel it any more; it runs to the end."
     if (action === "signal") return "They can claim that part now."
-    if (action === "transfer") return "The new beneficiary claims from now on; send them the schedule's address."
+    if (action === "transfer") return "The person receiving claims from now on; send them the schedule's address."
     if (action === "import") return "It's in your list. Choose it to see what you can claim."
     if (action === "connect") return "Connected. Your schedules are below; if someone sent you one, paste its address."
     return ""
@@ -686,4 +686,4 @@ export function writeWhat(what) {
 export const GUIDE_URL = "https://github.com/jefdiesel/vest/blob/main/docs/USER-GUIDE.md"
 
 /// Why paying out needs a wallet folder for now (Names Wallet's program calls can't carry it).
-export const NAMES_CANT_PAY = "Names Wallet can approve claims, but a new schedule, a cancel or a milestone needs Names Wallet 0.18 or later: those also read the network's clock in the same step. Update Names, then come back. You can still read how it works below."
+export const NAMES_CANT_PAY = "Names Wallet can approve claims, but a new schedule, a cancel or a milestone needs Names Wallet 0.18 or later: those also read the network's clock in the same step. Update Names Wallet, then come back. You can still read how it works below."

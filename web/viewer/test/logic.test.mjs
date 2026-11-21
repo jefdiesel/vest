@@ -83,6 +83,6 @@ test('PDA derivation has a fixed vector', async () => {
 test('input classification and amount formatting', () => {
   assert.deepEqual(classifyInput('  jef05 '), { type: 'name', value: 'jef05' });
   assert.equal(classifyInput(base58Encode(new Uint8Array(32).fill(1))).type, 'account');
-  assert.throws(() => classifyInput('!!'), /account id/);
+  assert.throws(() => classifyInput('!!'), /address/);
   assert.equal(grouped(1234567n), '1,234,567');
 });

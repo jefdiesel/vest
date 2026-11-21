@@ -5,7 +5,7 @@
 import { Client } from './logos-sdk/rpc.js';
 import { clock, labels, lns } from './logos-sdk/index.js';
 import {
-  classifyInput, decodeScheduleState, decodeVestingEvent, describeSchedule,
+  amountText, classifyInput, decodeScheduleState, decodeVestingEvent, describeSchedule,
   scheduleAddress,
 } from './logic.mjs';
 
@@ -59,11 +59,11 @@ function showSchedule(schedule, details, history, container) {
   const card = document.createElement('section');
   card.className = 'card';
   card.append(table([
-    ['Kind', details.kind], ['Total', details.total], ['Vested now', details.vested],
+    ['Kind', details.kind], ['Total', details.total], ['Unlocked now', details.vested],
     ['Claimed', details.claimed], ['Claimable', details.claimable], ['Locked', details.locked],
     ['Next unlock', details.nextUnlock], ['Cancelled', details.cancelled],
     ['Transferable', details.transferable], ['Creator', details.creator],
-    ['Beneficiary', details.beneficiary], ['Effective time', details.lastTime],
+    ['Receives', details.beneficiary], ['Network time', details.lastTime],
   ]));
   const heading = document.createElement('h2');
   heading.textContent = 'Event history';
@@ -71,7 +71,7 @@ function showSchedule(schedule, details, history, container) {
   if (!history.available) {
     const note = document.createElement('p');
     note.className = 'note';
-    note.textContent = 'This sequencer does not serve getEvents; state above still comes from the chain.';
+    note.textContent = 'This node cannot show past events; the schedule above still comes from the chain.';
     card.append(note);
   } else if (history.events.length === 0) {
     card.append(Object.assign(document.createElement('p'), { textContent: 'No events for this schedule.' }));
@@ -79,7 +79,7 @@ function showSchedule(schedule, details, history, container) {
     const list = document.createElement('ul');
     for (const event of history.events) {
       const item = document.createElement('li');
-      item.textContent = `${event.name} at ${new Date(Number(event.at)).toISOString()}${event.amount !== undefined ? ` · ${event.amount} (raw)` : ''}${event.toPrivate !== undefined ? ` · private=${event.toPrivate}` : ''}`;
+      item.textContent = `${event.name} at ${new Date(Number(event.at)).toISOString()}${event.amount !== undefined ? ` · ${amountText(event.amount)}` : ''}${event.toPrivate !== undefined ? ` · ${event.toPrivate ? 'private' : 'public'}` : ''}`;
       list.append(item);
     }
     card.append(list);
@@ -96,20 +96,20 @@ export async function run({ rpcUrl, program, input, nonce, status, result }) {
     status.textContent = `Resolving ${input}…`;
     const record = await lns.resolveName(client, labels.LNS_PROGRAM, input);
     account = lns.publicView(record)?.publicAccount;
-    if (!account) throw new Error(`the name ${input} has no public account; enter an account id directly`);
+    if (!account) throw new Error(`No public account is published on that LNS name. Enter the address instead.`);
   }
 
   status.textContent = 'Reading chain state…';
   let state = await readState(client, program, account);
   if (!state && nonce) {
-    status.textContent = 'Deriving schedule address from creator + nonce…';
+    status.textContent = 'Finding the schedule from its creator…';
     account = await scheduleAddress(program, account, nonce);
     state = await readState(client, program, account);
   }
   if (!state) {
-    throw new Error('no vesting state at that account. Give a schedule account, or a creator + nonce; the program has no on-chain index for beneficiary-only lookups.');
+    throw new Error('No schedule found at that address. Enter its address, or the creator and label.');
   }
-  if (!state.schedule) throw new Error('the schedule is still being created (clock read pending)');
+  if (!state.schedule) throw new Error('The schedule is still being created. Try again in a moment.');
 
   status.textContent = 'Reading clock and events…';
   let now = Date.now();
