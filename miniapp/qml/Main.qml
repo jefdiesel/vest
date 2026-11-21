@@ -347,7 +347,7 @@ Item {
     function sharedParams() {
         return {
             kind: cKind, token: "LEZ",
-            start: Logic.parseDate(startField.text), cliff: Logic.parseDate(cliffField.text), end: Logic.parseDate(endField.text),
+            start: startField.ms, cliff: cliffField.ms, end: endField.ms,
             cancelable: cCancelable, transferable: cTransferable,
             cancelAuthority: cancelAuthField.text.trim(), milestoneAuthority: milestoneAuthField.text.trim()
         }
@@ -778,9 +778,9 @@ Item {
                     Label { text: "Starts" }
                     Label { visible: root.cKind === "cliff-linear"; text: "Cliff" }
                     Label { text: "Fully unlocked" }
-                    Field { id: startField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "2026-12-01" }
-                    Field { id: cliffField; look: root.look; Layout.preferredWidth: 1; visible: root.cKind === "cliff-linear"; Layout.fillWidth: true; hint: "2027-12-01" }
-                    Field { id: endField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "2030-12-01" }
+                    DateTimeField { id: startField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "Choose a date and time" }
+                    DateTimeField { id: cliffField; look: root.look; Layout.preferredWidth: 1; visible: root.cKind === "cliff-linear"; Layout.fillWidth: true; hint: "Choose a date and time" }
+                    DateTimeField { id: endField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "Choose a date and time" }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true

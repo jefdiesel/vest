@@ -60,6 +60,54 @@ export function parseDate(text) {
     return Date.parse(String(text || "").trim() + "T00:00:00Z")
 }
 
+// ── Local date and time picker ───────────────────────────────────────────────────────
+// All of these use the local Date constructors. Adding 86400000 per day skips or repeats a day
+// at a daylight-saving change, so the grid always builds dates from (year, month, day).
+
+/// 42 cells (six weeks), Monday first: {day, inMonth, date} where date is local midnight in ms.
+export function monthGrid(year, month) {
+    var first = new Date(year, month, 1)
+    var back = (first.getDay() + 6) % 7
+    var start = new Date(year, month, 1 - back)
+    var cells = []
+    for (var i = 0; i < 42; i++)
+        cells.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))
+    return cells.map(function(d) {
+        return { day: d.getDate(), inMonth: d.getMonth() === month, date: d.getTime() }
+    })
+}
+
+/// Local midnight-plus-time as epoch ms.
+export function atLocal(year, month, day, hour, minute) {
+    return new Date(year, month, day, num(hour), num(minute), 0, 0).getTime()
+}
+
+/// The local parts of an epoch-ms moment.
+export function partsOf(ms) {
+    var d = new Date(ms)
+    return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate(),
+        hour: d.getHours(), minute: d.getMinutes() }
+}
+
+/// The browser's short time-zone name, or "" when it cannot say.
+export function timeZoneName() {
+    var words = String(new Date().toLocaleTimeString("en-US", { timeZoneName: "short" })).split(/\s+/)
+    return words.length > 0 ? words[words.length - 1] : ""
+}
+
+/// "Sat 21 Nov 2026 · 09:00 (your time, EST)" — "" when there is no moment yet.
+export function dateTimeText(ms) {
+    if (ms === null || ms === undefined || ms < 0 || !isFinite(Number(ms))) return ""
+    var d = new Date(ms)
+    var week = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    function two(n) { return (n < 10 ? "0" : "") + n }
+    var zone = timeZoneName()
+    return week[d.getDay()] + " " + d.getDate() + " " + months[d.getMonth()] + " " + d.getFullYear()
+        + " · " + two(d.getHours()) + ":" + two(d.getMinutes())
+        + " (your time" + (zone ? ", " + zone : "") + ")"
+}
+
 /// "in 3 days", "in 5 h", "in 2 min", "now". A positive duration from `now`.
 export function inText(ms, now) {
     ms = num(ms)

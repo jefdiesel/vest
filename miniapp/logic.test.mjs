@@ -397,3 +397,30 @@ check("zoneProblem: no zone or no chain to compare", [
     check("no reserved word used as a name in " + f, bad, []);
   }
 }
+// ── Local date-and-time picker (monthGrid, atLocal, partsOf, dateTimeText) ────────────
+check("monthGrid: February 2027 starts on Monday with 28 real days", (() => {
+  const g = L.monthGrid(2027, 1);
+  return [g.length, g[0].day, g[0].inMonth, new Date(g[0].date).getDay(),
+    g.filter((c) => c.inMonth).length, g[41].day, g[41].inMonth];
+})(), [42, 1, true, 1, 28, 14, false]);
+check("monthGrid: a 31-day month starting on Sunday (March 2026)", (() => {
+  const g = L.monthGrid(2026, 2);
+  return [g[0].day, g[0].inMonth, g[6].day, g[6].inMonth,
+    g.filter((c) => c.inMonth).length, g[41].day, g[41].inMonth];
+})(), [23, false, 1, true, 31, 5, false]);
+check("monthGrid: days stay local midnight across a daylight-saving change", (() => {
+  const g = L.monthGrid(2026, 2);
+  const at = (day) => g.filter((c) => c.inMonth && c.day === day)[0];
+  return [7, 8, 9].map((day) => {
+    const d = new Date(at(day).date);
+    return [L.partsOf(at(day).date).day, d.getHours(), d.getMinutes()];
+  });
+})(), [[7, 0, 0], [8, 0, 0], [9, 0, 0]]);
+check("atLocal and partsOf round-trip a local moment", L.partsOf(L.atLocal(2026, 10, 21, 9, 5)),
+  { year: 2026, month: 10, day: 21, hour: 9, minute: 5 });
+{
+  const text = L.dateTimeText(L.atLocal(2026, 10, 21, 9, 0));
+  check("dateTimeText: a full moment and an empty field",
+    [/^Sat 21 Nov 2026 · 09:00 \(your time(, .+)?\)$/.test(text), L.dateTimeText(-1), L.dateTimeText(null)],
+    [true, "", ""]);
+}
