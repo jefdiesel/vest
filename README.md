@@ -80,7 +80,7 @@ Times are Unix milliseconds. The CLI prints amounts as decimal numbers and dates
 Three schedule kinds are supported.
 
 ```sh
-# Fully linear: 1,000,000 tokens from 2027-01-01 to 2028-01-01.
+# Fully linear: 1,000,000 tokens from 2026-01-01 to 2027-01-01.
 $V --now 1767225600000 create \
   --creator $ALICE --beneficiary $BOB --token $TOKEN \
   --total 1000000 --kind linear \
