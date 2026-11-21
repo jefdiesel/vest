@@ -663,10 +663,10 @@ export function guideSteps(role, at) {
         ? ["Connect Names Wallet",
            "Choose who, how much and the schedule",
            "Approve it in Names Wallet",
-           "Send them the schedule code",
+           "It reaches them by itself",
            "Cancel it, or make it permanent, later if you need to"]
         : ["Connect Names Wallet",
-           "Your schedules appear here (or paste the address someone sent you)",
+           "Your schedules appear here by themselves",
            "See what you can claim now and when the rest unlocks",
            "Claim to your public account, or privately",
            "Approve it in Names Wallet"]
@@ -674,10 +674,10 @@ export function guideSteps(role, at) {
         ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Below: the account that pays, the person (address or LNS name), the amount, and when it unlocks.",
            "Names Wallet shows the payment and its fee. Nothing leaves your account until you approve.",
-           "Press Copy schedule code and send it to them. In their Vest they open Receive, paste it and press Add schedule.",
+           "It shows up in their Vest by itself, under Unvested or Claimable. If it doesn't, send them the schedule code (Copy schedule code): they add it under Unvested, Add a schedule by code.",
            "Cancel stops what hasn't unlocked and returns it to you. Permanent means nobody can cancel."]
         : ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
-           "Schedules paid to your accounts show up by themselves. If not, paste the address or LNS name the sender gave you.",
+           "Vest looks for schedules paying your accounts on the chain and lists them under Claimable or Unvested. If one is missing, add it with its schedule code under Unvested.",
            "Choose a schedule below: it shows what is claimable now, what is still locked, and the next unlock.",
            "Press Check claim. Vest shows the amount and where it goes before anything is sent.",
            "Names Wallet shows the claim and its fee. Approve it there; the tokens arrive in a few seconds."]
@@ -724,7 +724,7 @@ export function timeline(kind) {
 /// What happens next, after each action: one line for the Result line.
 export function nextLine(action, info) {
     info = info || {}
-    if (action === "create") return "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
+    if (action === "create") return "Schedule " + info.id + " is live. It shows up in their Vest by itself. If it doesn't, send them its schedule code (Copy schedule code, below)."
     if (action === "batch") return "The schedules are live. Send each person their schedule code, or your LNS name."
     if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
     if (action === "cancel") return "Nothing more unlocks. What had already unlocked stays theirs to claim."
@@ -732,7 +732,7 @@ export function nextLine(action, info) {
     if (action === "signal") return "They can claim that part now."
     if (action === "transfer") return "The person receiving claims from now on; send them the schedule code."
     if (action === "import") return "It's in your list. Choose it to see what you can claim."
-    if (action === "connect") return "Connected. Your schedules are below; if someone sent you one, paste its schedule code."
+    if (action === "connect") return "Connected. Vest now looks for schedules paying your accounts; they show up under Claimable and Unvested."
     return ""
 }
 
@@ -789,7 +789,7 @@ export function receiptOf(r) {
         { key: "Transaction", value: r.tx ? short(r.tx) : "sent", addr: r.tx || "" },
         { key: "Schedule code", value: r.code ? short(r.code) : "", addr: r.code || "" }
     ]
-    var share = "Send them the schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
+    var share = "It shows up in their Vest by itself, under Unvested or Claimable. If it doesn't, send them the schedule code (Copy schedule code, below): they add it under Unvested."
     return { title: "Schedule " + (r.id !== undefined && r.id !== "" ? r.id + " " : "") + "created", rows: rows, share: share }
 }
 
@@ -805,3 +805,95 @@ export const GUIDE_URL = "https://github.com/jefdiesel/vest/blob/main/docs/USER-
 
 /// Why paying out needs a wallet folder for now (Names Wallet's program calls can't carry it).
 export const NAMES_CANT_PAY = "Names Wallet can approve claims, but a new schedule, a cancel or a milestone needs Names Wallet 0.18 or later: those also read the network's clock in the same step. Update Names Wallet, then come back. You can still read how it works below."
+
+// ── Schedules paying you: the menu ──────────────────────────────────────────────────────
+
+/// The left menu, in order.
+export const MENU = [
+    { key: "claimable", label: "Claimable" },
+    { key: "unvested", label: "Unvested" },
+    { key: "pay", label: "Paying out" },
+    { key: "settings", label: "Settings" }
+]
+
+/// Where a schedule paying you belongs: "claimable" (something to claim now), "closed" (all
+/// claimed, or cancelled with nothing left) or "unvested" (nothing now, more to come). The same
+/// words as the module's incoming().
+export function receiveCategory(s) {
+    s = s || {}
+    if (above(s.claimable || "0", "0")) return "claimable"
+    if (s.cancelled || isFullyClaimed(s)) return "closed"
+    return "unvested"
+}
+
+/// The schedules paying you that are in `category`.
+export function paying(schedules, category) {
+    return (schedules || []).filter(function(s) { return s && s.mine && s.mine.beneficiary && receiveCategory(s) === category })
+}
+
+/// The menu with a count badge on Claimable and Unvested: `[{key, label, count}]` (count -1: none).
+export function menuItems(schedules) {
+    return MENU.map(function(m) {
+        var n = m.key === "claimable" || m.key === "unvested" ? paying(schedules, m.key).length : -1
+        return { key: m.key, label: m.label, count: n }
+    })
+}
+
+/// The first time more can be claimed (ms), or 0 when no date says so (milestones). The
+/// module's `next_unlock` when it gave one; otherwise the start or the cliff still ahead.
+export function nextClaimAt(s, now) {
+    s = s || {}
+    if (s.next_unlock !== undefined && s.next_unlock !== null) return num(s.next_unlock)
+    if (s.kind === "milestone" || s.cancelled) return 0
+    if (s.kind === "cliff-linear" && cmpDec(now, s.cliff) < 0) return num(s.cliff)
+    if (cmpDec(now, s.start) < 0) return num(s.start)
+    return 0
+}
+
+/// "Nothing to claim until Tue 1 Dec 2026 · 09:00 (your time)." for a schedule with nothing claimable yet.
+export function untilLine(s, now) {
+    s = s || {}
+    if (s.kind === "milestone") return "Nothing to claim until the creator says the next milestone is reached."
+    var at = nextClaimAt(s, now)
+    return at > 0 ? "Nothing to claim until " + dateTimeText(at) + "." : "Nothing to claim yet."
+}
+
+/// Who pays: their LNS name when known, else the short address.
+export function fromName(s, names) {
+    s = s || {}
+    return nameOf(s.creator, names) || short(base58Of(s.creator || ""))
+}
+
+/// An Unvested row: "Schedule 3 · 1,000 LEZ from alice" and "until 2026-12-01".
+export function unvestedRow(s, names, now) {
+    s = s || {}
+    var at = nextClaimAt(s, now)
+    return {
+        label: "Schedule " + s.id + " · " + (s.total_display || "") + " from " + fromName(s, names),
+        detail: s.kind === "milestone" ? "at the next milestone" : at > 0 ? "until " + dateText(at) : "soon"
+    }
+}
+
+/// The quiet line while Vest reads the chain: "Looking for schedules on the chain… block X of Y".
+/// `scan`: the last discover answer (`to_block`, `tip`, `done`) or null. "" once at the tip.
+export function scanLine(scan) {
+    if (!scan || scan.done) return ""
+    var at = scan.to_block === null || scan.to_block === undefined ? scan.from_block : scan.to_block
+    if (at === undefined || at === null || !scan.tip) return "Looking for schedules on the chain…"
+    return "Looking for schedules on the chain… block " + grouped(String(at)) + " of " + grouped(String(scan.tip))
+}
+
+/// "New: 1 schedule from alice" for the schedules a scan just found (`[{creator}]`, hex).
+export function newLine(found, names) {
+    found = found || []
+    if (!found.length) return ""
+    var from = []
+    found.forEach(function(f) {
+        var who = nameOf(f.creator, names) || short(base58Of(f.creator || ""))
+        if (from.indexOf(who) < 0) from.push(who)
+    })
+    var people = from.length === 1 ? from[0]
+        : from.length <= 3 ? from.slice(0, -1).join(", ") + " and " + from[from.length - 1]
+        : from.slice(0, 2).join(", ") + " and " + (from.length - 2) + " others"
+    return "New: " + found.length + " schedule" + (found.length === 1 ? "" : "s") + " from " + clean(people)
+}

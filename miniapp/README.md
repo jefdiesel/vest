@@ -1,6 +1,6 @@
 # Vest mini-app for Basecamp
 
-The current packages are `vesting_ui` 0.5.8 and `vesting` 0.4.0 on macOS Apple silicon. Linux is
+The current packages are `vesting_ui` 0.6.0 and `vesting` 0.5.0 on macOS Apple silicon. Linux is
 to be rebuilt once from the final Mac version.
 
 Two Basecamp packages:
@@ -22,7 +22,9 @@ The module's calls (`module/rust-lib/src/lib.rs`; each answers JSON `{"ok":true,
 | `create(json)`, `create_batch(json)` | `Client::create`, `Client::create_batch` (one transaction). |
 | `claim_public(id)`, `claim_private(id, target)` | `Client::claim_public` / `claim_private`. A private target must be a private account the wallet holds (else code 1001), and a claim whose private destination could not pay the simulated fee is not sent. |
 | `cancel(id)`, `make_irrevocable(id)`, `signal_milestone(id, index)`, `transfer_beneficiary(id, to)` | The matching `Client` calls. |
-| `import_schedule(account)` | Gives a schedule account made elsewhere a local id, so its beneficiary sees it. |
+| `import_schedule(account)` | Gives a schedule account made elsewhere a local id, so its beneficiary sees it (the app's "Add a schedule by code", under Unvested). |
+| `discover(max_blocks)` | Finds schedules on the chain by itself (the chain has no lookup by beneficiary): reads at most `max_blocks` blocks (text; empty = 2000, at most 10000) after the last one read, from the program's first block (`programs.vesting.floor_block` of the network file, 38700 on the built-in network). One RPC call at a time, at least 1 s apart, and about 10 s per call. Blocks are `common::block::Block` (LEZ rc3); an actor whose program account is Vest's (compared as bytes) is an account to read, and an account holding a schedule is remembered with its last state. Schedules whose current beneficiary (or creator) is one of the wallet's accounts are imported, so `list()` shows them; a schedule touched again later is read again (a transfer to you or away from you). Answer: `{chain_id, from_block, to_block, tip, done, found, new, incoming, known, pending}`; `found` lists the schedules paying you that this call added (base58), `new` the same with their creator. The app calls it again until `done`, then every minute. State: `vesting-discover.json` in the module's folder, per chain id and program (another one starts over). |
+| `incoming(accounts_json)` | For another app (Names Wallet): the known schedules paying any of the accounts (a JSON array, base58 or hex), from the scan state only, no new scanning: `{to_block, tip, time, schedules: [{address, creator, beneficiary (hex, with *_base58), total_display, claimed_display, claimable_display (with the unit, e.g. "1,000 LEZ"), next_unlock_ms, status}]}`; status is `unvested` (nothing claimable now, more to come), `claimable` or `closed` (all claimed, or cancelled with nothing left). Times use the computer's clock. |
 | `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). The app calls it for an address typed in the payout box, and for a name while the wallet isn't connected; with the wallet connected a name is looked up through the wallet instead (below). |
 | `set_accounts(json)`, `claim_call(id)` | Names Wallet mode: the accounts Names granted, and a public LEZ claim built as a Names `propose_call` (program, accounts, instruction, summary). |
 | `create_call(params)`, `cancel_call(id)`, `irrevocable_call(id)`, `signal_call(id, index)`, `transfer_call(id, new_beneficiary)` | Names Wallet 0.18+ mode: the same change built as a Names `propose_call` (`{program, accounts_json, instruction_hex, summary, caller}`); the person approves it in Names, choosing `caller`. |
@@ -104,8 +106,10 @@ at most 680 px wide, 56 px from the window's edge, as in the Names Wallet.
   `create_batch`, `claim_private` and wallet-folder calls stay for the CLI and its tests; the app
   never calls them).
 - The module answers one call at a time.
-- Schedule ids are local to the module's data folder; a beneficiary on another machine pastes the
-  **schedule code** under **Receive**, **Add schedule**. An LNS name cannot find a schedule yet.
+- Schedule ids are local to the module's data folder. A beneficiary's Vest finds schedules paying
+  it on the chain (`discover`); the first scan of the bridge test network reads about 7,300 blocks
+  and takes about 4 minutes at one call a second. The schedule code (**Unvested**, **Add a
+  schedule by code**) stays as a fallback.
 - Display maths use the module's chain time and match `vesting-core` exactly (fixed cases from
   `core/tests/unit.rs` in the Node tests; a decimal-limb fallback where QML has no BigInt).
 - Only the beneficiary address is public at creation (as the RFP specifies); commitment-based

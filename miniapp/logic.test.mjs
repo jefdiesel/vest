@@ -174,7 +174,7 @@ check("namesAccounts joins balances", L.namesAccounts({ accounts: [{ account: "P
 
 // ── Guides ────────────────────────────────────────────────────────────────────────
 check("guide: receiving, five one-line steps, current marked", L.guideSteps("receive", 2).map(s => s.state), ["done", "done", "now", "later", "later"]);
-check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "Send them the schedule code", "Cancel it, or make it permanent, later if you need to"]);
+check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "It reaches them by itself", "Cancel it, or make it permanent, later if you need to"]);
 check("guide: every step says what to do", ["receive", "pay"].every(r => L.guideSteps(r, 0).every(x => typeof x.detail === "string" && x.detail.length > 20)), true);
 check("payee: a name shows who and the address", L.payeeLine("alice", { ok: true, name: "alice", base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).ok, true);
 check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error: "unknown LNS name: nobdy" }).text.startsWith("No one holds the LNS name nobdy"), true);
@@ -203,14 +203,14 @@ check("importing a name says to ask for the schedule code", L.importProblem("jef
 {
   const rc = L.receiptOf({ id: 3, amountDisplay: "1 LEZ", kind: "linear", start: L.atLocal(2026, 10, 21, 9, 0), end: L.atLocal(2026, 10, 22, 9, 0), cancelable: true, transferable: false,
     fromAddr: "BawxwquWtPEVcrwSFftD6jS3XFxZNv4qYrV8pkyo9mu7", fromName: "jefdiesel", toAddr: "CCVd76Tk3WvFb63Wbuu4exMeLRTbSuMWHqxuvysapKnk", toName: "jef04", tx: "ab".repeat(32), code: "cd".repeat(16) });
-  check("receipt: title, names first, addresses kept, what to share", [rc.title, rc.rows[1].value, rc.rows[1].addr.length, rc.rows[2].value, rc.rows[3].value.startsWith("Evenly, from Sat 21 Nov 2026 · 09:00"), rc.share.startsWith("Send them the schedule code")],
+  check("receipt: title, names first, addresses kept, what to share", [rc.title, rc.rows[1].value, rc.rows[1].addr.length, rc.rows[2].value, rc.rows[3].value.startsWith("Evenly, from Sat 21 Nov 2026 · 09:00"), rc.share.startsWith("It shows up in their Vest by itself")],
     ["Schedule 3 created", "jefdiesel", 44, "jef04", true, true]);
 }
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);
 check("timelines", [L.timeline("linear").length, L.timeline("cliff-linear")[1].kind, L.timeline("milestone").every(s => s.kind !== "unlocking")], [1, "cliff", true]);
-check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. Send them its schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule.", true, ""]);
+check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. It shows up in their Vest by itself. If it doesn't, send them its schedule code (Copy schedule code, below).", true, ""]);
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has unlocked for you\./.test(qml)], [false, false, true]);
@@ -348,7 +348,7 @@ check("nextLine: every remaining action", [
   "Nobody can cancel it any more; it runs to the end.",
   "They can claim that part now.",
   "The person receiving claims from now on; send them the schedule code.",
-  "Connected. Your schedules are below; if someone sent you one, paste its schedule code."
+  "Connected. Vest now looks for schedules paying your accounts; they show up under Claimable and Unvested."
 ]);
 check("writeWhat: the other write names", [L.writeWhat("irrevocable:3"), L.writeWhat("transfer:3")], ["making it permanent", "the transfer"]);
 check("an unknown kind reads as linear in words and on the timeline", [
@@ -436,4 +436,36 @@ check("atLocal and partsOf round-trip a local moment", L.partsOf(L.atLocal(2026,
   const src = readFileSync(new URL("./qml/kit/DateTimeField.qml", import.meta.url), "utf8") + readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   const bad = (src.match(/property int (ms|picked|today|[a-zA-Z]*(Ms|Time))\b/g) || []);
   check("no time in milliseconds is held in a 32-bit int property", bad, []);
+}
+
+// ── Schedules arrive by themselves: the left menu, Unvested, the scan lines ─────────────
+{
+  const me = { beneficiary: true, creator: false };
+  const row = (extra) => ({ id: 1, kind: "linear", total: "1000", total_display: "1,000 LEZ", claimed: "0", claimable: "0", start: NOW + DAY, end: NOW + 10 * DAY, creator: "0a".repeat(32), mine: me, ...extra });
+  const claimNow = row({ id: 2, claimable: "5", start: NOW - DAY });
+  const later = row({ id: 3 });
+  const done = row({ id: 4, claimed: "1000" });
+  const cancelled = row({ id: 5, cancelled: true, claimed: "300" });
+  const cancelledLeft = row({ id: 6, cancelled: true, claimable: "20" });
+  const notMine = row({ id: 7, claimable: "9", mine: { beneficiary: false, creator: true } });
+  const all = [claimNow, later, done, cancelled, cancelledLeft, notMine];
+  check("category: claimable, unvested, closed (the module's incoming() words)",
+    [claimNow, later, done, cancelled, cancelledLeft].map(L.receiveCategory), ["claimable", "unvested", "closed", "closed", "claimable"]);
+  check("menu: Claimable and Unvested count the schedules paying you", L.menuItems(all).map(m => [m.key, m.label, m.count]),
+    [["claimable", "Claimable", 2], ["unvested", "Unvested", 1], ["pay", "Paying out", -1], ["settings", "Settings", -1]]);
+  check("paying(): only schedules paying you", L.paying(all, "claimable").map(s => s.id), [2, 6]);
+  check("next claim: the module's next_unlock first", L.nextClaimAt(row({ next_unlock: NOW + 5 * DAY }), NOW), NOW + 5 * DAY);
+  check("next claim: start, cliff, milestone", [L.nextClaimAt(later, NOW), L.nextClaimAt(row({ kind: "cliff-linear", start: NOW - DAY, cliff: NOW + 3 * DAY }), NOW), L.nextClaimAt(row({ kind: "milestone" }), NOW)], [NOW + DAY, NOW + 3 * DAY, 0]);
+  check("until: a date", L.untilLine(later, NOW), "Nothing to claim until " + L.dateTimeText(NOW + DAY) + ".");
+  check("until: a milestone has no date", L.untilLine(row({ kind: "milestone" }), NOW), "Nothing to claim until the creator says the next milestone is reached.");
+  check("unvested row: from the LNS name", L.unvestedRow(later, { ["0a".repeat(32)]: "alice" }, NOW), { label: "Schedule 3 · 1,000 LEZ from alice", detail: "until " + L.dateText(NOW + DAY) });
+  check("unvested row: from a short address without a name", /^Schedule 3 · 1,000 LEZ from \w{6}…\w{4}$/.test(L.unvestedRow(later, {}, NOW).label), true);
+  check("scan line: block X of Y while reading", L.scanLine({ to_block: 40000, tip: 45883, done: false }), "Looking for schedules on the chain… block 40,000 of 45,883");
+  check("scan line: quiet once at the tip, or before the first answer", [L.scanLine({ to_block: 45883, tip: 45883, done: true }), L.scanLine(null), L.scanLine({ done: false })], ["", "", "Looking for schedules on the chain…"]);
+  const names = { ["0a".repeat(32)]: "alice", ["0b".repeat(32)]: "bob" };
+  check("new line: one schedule", L.newLine([{ creator: "0a".repeat(32) }], names), "New: 1 schedule from alice");
+  check("new line: several, names once each", L.newLine([{ creator: "0a".repeat(32) }, { creator: "0b".repeat(32) }, { creator: "0a".repeat(32) }], names), "New: 3 schedules from alice and bob");
+  check("new line: nothing new says nothing", L.newLine([], names), "");
+  check("guide and receipt no longer send people to a Receive tab",
+    [L.guideSteps("pay", 0), L.guideSteps("receive", 0)].flat().concat([{ text: L.receiptOf({}).share, detail: L.nextLine("create", { id: 1 }) }]).some(x => /open Receive/.test(x.text + x.detail)), false);
 }

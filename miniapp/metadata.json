@@ -1,7 +1,7 @@
 {
   "name": "vesting_ui",
   "display_name": "Vest",
-  "version": "0.5.8",
+  "version": "0.6.0",
   "type": "ui_qml",
   "category": "finance",
   "description": "Pay tokens out over time, or claim what has vested to you; signs through your Names Wallet",
@@ -10,7 +10,7 @@
   "dependencies": [
     {
       "name": "vesting",
-      "version": ">=0.4.0"
+      "version": ">=0.5.0"
     }
   ],
   "provides": [],

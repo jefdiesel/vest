@@ -30,10 +30,19 @@ unlocked** and pick the day, hour and minute in your local time.
 ## Receiving tokens
 
 1. **Connect Names Wallet**
-2. **Your schedules appear here (or paste the address someone sent you)**. A schedule someone made
-   for you shows up once you add it: ask the person paying you for their **schedule code** (or their
-   LNS name) and paste it under **Add a schedule**. An LNS name can't find a schedule yet, so the
-   schedule code is what works. If you paste something else, Vest says why in plain words.
+2. **Your schedules appear here by themselves**. Once you are connected, Vest looks on the chain
+   for schedules paying your accounts. While it reads, a quiet line says "Looking for schedules on
+   the chain… block X of Y"; when one arrives it says "New: 1 schedule from alice". The menu on the
+   left sorts them:
+   - **Claimable**: schedules with something to claim now (the number is how many).
+   - **Unvested**: schedules paying you later, with the total, who pays and "Nothing to claim
+     until <date>". Finished ones (fully claimed, or cancelled with nothing left) are listed
+     there too, under *Finished*.
+   - **Paying out**: schedules you created, and **New schedule**.
+   - **Settings**.
+   In a narrow window the menu is a row at the top. A schedule missing? Ask the person paying you
+   for its **schedule code** and paste it under **Unvested**, **Add a schedule by code**. If you
+   paste something else, Vest says why in plain words.
 3. **See what you can claim now and when the rest unlocks**. Choose a schedule: Vest shows what you
    can claim now, what you have claimed, what is still locked, and when the rest unlocks. A
    cancelled schedule says when it
@@ -60,7 +69,7 @@ still to unlock to another account; Names Wallet 0.18 or later approves it for a
 ## Paying out
 
 1. **Connect Names Wallet**
-2. **Choose who, how much and the schedule** on **Pay out**:
+2. **Choose who, how much and the schedule** on **Paying out**:
    - **Evenly**: it unlocks a little every moment, evenly, from the start date to the end date.
    - **Cliff, then evenly**: nothing unlocks before the cliff date; at the cliff, everything
      earned so far unlocks at once; after that it keeps unlocking until the end date.
@@ -86,10 +95,10 @@ still to unlock to another account; Names Wallet 0.18 or later approves it for a
    Vest stops and says: "This schedule needs 1,000 LEZ, and the paying account holds 500 LEZ.
    Lower the amount, or add LEZ to the account first."
 3. **Approve it in Names Wallet**
-4. **Send them the schedule code**. Press **Copy schedule code** and send it to them. In their
-   Vest they open **Receive**, paste it and press **Add schedule**. An LNS name cannot find a
-   schedule yet, so share the code.
-5. **Later:** on **Pay out**, under *Schedules you manage*: cancel a schedule, make it permanent,
+4. **It reaches them by itself**. Their Vest finds the schedule on the chain and lists it under
+   **Unvested** or **Claimable**. If it doesn't show up, press **Copy schedule code** and send it to
+   them: they add it under **Unvested**, **Add a schedule by code**.
+5. **Later:** on **Paying out**, under *Schedules you manage*: cancel a schedule, make it permanent,
    or unlock a milestone. Cancelling and making permanent each ask you to confirm, because neither
    can be undone.
 

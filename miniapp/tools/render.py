@@ -74,7 +74,27 @@ NAMES_ROW = {"name": "names", "moduleName": "names", "type": "core", "category":
 CLAIM_CALL = {"ok": True, "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "accounts_json": "[]", "instruction_hex": "05",
               "amount": "31333", "amount_display": lez("31333"), "summary": "Claim", "caller": "Public/2BhK"}
 
-# Each scenario: (vesting answers, names answers, script). Names answers are values (wrapped
+# Schedules arriving by themselves: two to claim (one from bob), one still unvested, one finished.
+BOB = "55" * 32
+INCOMING = {"ok": True, "time": NOW, "names": {ME: "alice", BOB: "bob"}, "schedules": [
+    schedule(0, {"type": "linear", "start": NOW - 30 * DAY, "end": NOW + 330 * DAY}, "1000000", "52000", "31333",
+             {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True}),
+    schedule(2, {"type": "cliff-linear", "start": NOW - 60 * DAY, "cliff": NOW - DAY, "end": NOW + 300 * DAY}, "5000000000000", "0", "833333333333",
+             {"beneficiary": True, "creator": False, "cancel_authority": False, "milestone_authority": False}, creator=BOB, cancel_authority=BOB, milestone_authority=BOB),
+    schedule(3, {"type": "linear", "start": NOW + 9 * DAY, "end": NOW + 374 * DAY}, "12000000000000", "0", "0",
+             {"beneficiary": True, "creator": False, "cancel_authority": False, "milestone_authority": False}, creator=BOB, cancel_authority=BOB, milestone_authority=BOB,
+             next_unlock=NOW + 9 * DAY + 1, address="66" * 32),
+    schedule(4, {"type": "linear", "start": NOW - 90 * DAY, "end": NOW - 10 * DAY}, "250000000000", "250000000000", "0",
+             {"beneficiary": True, "creator": False, "cancel_authority": False, "milestone_authority": False}, creator=BOB, cancel_authority=BOB, milestone_authority=BOB),
+    schedule(1, {"type": "milestone", "tranches": ["400000", "600000"]}, "1000000", "0", "400000",
+             {"beneficiary": False, "creator": True, "cancel_authority": True, "milestone_authority": True},
+             beneficiary=OTHER, signalled=[True, False]),
+]}
+SCAN_DONE = {"ok": True, "chain_id": SETTINGS["network"]["chain_id"], "from_block": 45884, "to_block": 45883, "tip": 45883, "done": True, "found": [], "new": [], "incoming": 4, "known": 20, "pending": 0}
+SCAN_NEW = dict(SCAN_DONE, found=["7Ue2Wx…"], new=[{"id": 3, "address": "66" * 32, "creator": BOB}])
+
+# Each scenario: (vesting answers, names answers, script[, late script]). The late script runs
+# after the app's first reads and its first scan have answered. Names answers are values (wrapped
 # in the Provider SDK's envelope by the bridge).
 SCENARIOS = {
     "first-run": ({"settings": FIRST}, {"get_config": CONFIG, "granted_accounts": NOT_GRANTED}, ""),
@@ -128,6 +148,16 @@ SCENARIOS = {
     "no-wallet": ({"settings": FIRST}, {"__packages": [{"name": "vesting", "type": "core", "category": "finance"}]}, ""),
     "choose-wallet": ({"settings": FIRST}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]), ""),
     "unsupported-wallet": ({"settings": FIRST}, {"get_config": {"zone": CONFIG["zone"], "features": []}, "__packages": [{"name": "oldwallet", "type": "core", "category": "wallet", "displayName": "Old Wallet"}]}, ""),
+    "menu-badges": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, ""),
+    "claimable-detail": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.recipientId = 2"),
+    "unvested-list": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.tab = 'unvested'"),
+    "unvested-detail": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.tab = 'unvested'; root.recipientId = 3; page.contentY = 300"),
+    "unvested-add-by-code": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.tab = 'unvested'; page.contentY = page.contentHeight - page.height"),
+    "unvested-empty": ({"settings": DONE_GUIDE, "list": {"ok": True, "time": NOW, "names": {}, "schedules": []}}, WALLET_ON, "", "root.tab = 'unvested'"),
+    "scanning": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.scan = { ok: true, from_block: 38700, to_block: 40699, tip: 45883, done: false }"),
+    "new-schedule": ({"settings": DONE_GUIDE, "list": INCOMING, "discover": SCAN_NEW}, WALLET_ON, ""),
+    "narrow": ({"settings": DONE_GUIDE, "list": INCOMING, "discover": SCAN_NEW}, WALLET_ON, "root.width = 560"),
+    "narrow-unvested": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "root.width = 560", "root.tab = 'unvested'; root.recipientId = 3"),
     "chose-other-wallet": ({"settings": DONE_GUIDE}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]),
                            "wallet.chooseWallet('xwallet'); root.tab = 'settings'"),
 }
@@ -158,7 +188,8 @@ BRIDGE = r"""
     }
     Timer { id: later; interval: 400; onTriggered: root.confirmClaim() }
     Timer { id: scroll; interval: 2600; onTriggered: page.contentY = Math.max(0, page.contentHeight - page.height) }
-    Timer { interval: 300; running: true; onTriggered: { %(scenario)s; shot.start() } }
+    Timer { interval: 300; running: true; onTriggered: { %(scenario)s; shot.start(); lateShot.start() } }
+    Timer { id: lateShot; interval: 1400; onTriggered: { %(late)s } }
     Timer { id: shot; interval: 2900; onTriggered: root.grabToImage(function(result) { result.saveToFile("%(out)s"); Qt.quit() }) }
 """
 
@@ -172,12 +203,13 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     failed = 0
     for name in wanted:
-        extra, names, script = SCENARIOS[name]
+        extra, names, script = SCENARIOS[name][:3]
+        late = SCENARIOS[name][3] if len(SCENARIOS[name]) > 3 else ""
         answers = {"settings": SETTINGS, "accounts": ACCOUNTS, "list": LIST, "now": {"ok": True, "time": NOW}, "set_accounts": {"ok": True},
-                   "configure": {"ok": True}}
+                   "configure": {"ok": True}, "discover": SCAN_DONE}
         answers.update(extra)
         out = os.path.join(out_dir, name + ".png")
-        bridge = BRIDGE % {"answers": json.dumps(answers), "names": json.dumps(names), "scenario": script or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
+        bridge = BRIDGE % {"answers": json.dumps(answers), "names": json.dumps(names), "scenario": script or "0", "late": late or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
         with tempfile.NamedTemporaryFile("w", suffix=".qml", delete=False, dir=os.path.join(HERE, "..", "qml")) as handle:
             # The wallet a scenario chose is kept (QtQuick.LocalStorage) under the app's name: a
             # name of its own per run, so it never leaks into the next scenario or run.

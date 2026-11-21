@@ -48,7 +48,7 @@ Item {
     readonly property bool canWrite: namesCanCall
 
     // ── View state ──────────────────────────────────────────────────────────────────
-    property string tab: "receive"             // receive | pay | settings
+    property string tab: "claimable"           // claimable | unvested | pay | settings (the left menu)
     property bool guideOpen: false
     property string guideRole: "receive"
     property real tick: Date.now()
@@ -67,6 +67,14 @@ Item {
     property bool fromFull: false             // the From row shows the whole address
     property var receipt: null                 // the last create's receipt (Logic.receiptOf input)
     property var shownAddr: ({})               // which receipt rows show their full address
+    property bool autoTabDone: false           // the first read picked Unvested when nothing is claimable
+
+    // ── Finding schedules on the chain (the module's `discover`) ───────────────────
+    property var scan: null                    // the last discover answer
+    property bool scanBusy: false              // a discover call is out (one at a time)
+    property bool scanStarted: false
+    property string scanProblem: ""
+    property var newFound: []                  // schedules a scan added: [{id, address, creator}]
 
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
@@ -81,9 +89,22 @@ Item {
 
     // ── Derived ─────────────────────────────────────────────────────────────────────
     readonly property var recipientSchedules: schedules.filter(function(s) { return s.mine.beneficiary })
+    readonly property var claimableSchedules: Logic.paying(schedules, "claimable")
+    readonly property var unvestedSchedules: Logic.paying(schedules, "unvested")
+    readonly property var closedSchedules: Logic.paying(schedules, "closed")
+    readonly property bool receiving: tab === "claimable" || tab === "unvested"
+    // The schedules of the menu entry on screen; the detail shows the chosen one (or the first).
+    readonly property var shownSchedules: tab === "claimable" ? claimableSchedules
+        : tab === "unvested" ? unvestedSchedules.concat(closedSchedules) : []
+    readonly property var menu: Logic.menuItems(schedules)
+    // A wide window has the menu on the left; a narrow one has it as a row at the top.
+    readonly property bool wide: width >= 860
+    readonly property bool menuShown: connected || tab === "settings"
+    readonly property string scanText: scanBusy && scan === null ? "Looking for schedules on the chain…" : Logic.scanLine(scan)
+    readonly property string newText: Logic.newLine(newFound, names)
     readonly property var mySchedules: schedules.filter(function(s) {
         return s.mine.creator || s.mine.cancel_authority || s.mine.milestone_authority })
-    readonly property var selected: findById(recipientSchedules, recipientId)
+    readonly property var selected: findById(shownSchedules, recipientId) || (shownSchedules.length ? shownSchedules[0] : null)
     readonly property var publicAccounts: accounts.filter(function(a) { return !a["private"] })
     readonly property string networkName: info && info.network && info.network.name ? info.network.name : ""
     readonly property string firstAccount: accounts.length ? accounts[0].base58 : ""
@@ -197,8 +218,36 @@ Item {
             if (l.time) effectiveTime = l.time
             if (!findById(recipientSchedules, recipientId))
                 recipientId = recipientSchedules.length ? recipientSchedules[0].id : null
+            if (!autoTabDone && recipientSchedules.length) {
+                autoTabDone = true
+                if (tab === "claimable" && claimableSchedules.length === 0 && unvestedSchedules.length > 0) tab = "unvested"
+            }
+            if (!scanStarted && namesState === "connected") { scanStarted = true; discoverOnce() }
         }, 120000)
     }
+
+    /// Look for schedules on the chain: one `discover` call at a time, the next as soon as the
+    /// last one answers, until the scan reaches the chain's tip; then again every minute. A
+    /// schedule it adds is read with the rest (`list`), and said in one line.
+    function discoverOnce() {
+        if (scanBusy || !connected) return
+        scanBusy = true
+        call("discover", ["2000"], function(r) {
+            scanBusy = false
+            if (r.found && r.found.length) readChain()
+            if (!r.ok) {
+                scanProblem = r.error || "no answer"
+                scanTimer.restart()
+                return
+            }
+            scanProblem = ""
+            scan = r
+            if (r["new"] && r["new"].length) newFound = newFound.concat(r["new"])
+            if (r.done) scanTimer.restart()
+            else Qt.callLater(discoverOnce)
+        }, 120000)
+    }
+    Timer { id: scanTimer; interval: 60000; onTriggered: root.discoverOnce() }
 
     /// Show LNS names, not addresses: ask the wallet for the confirmed name of every account on
     /// screen (creators, people receiving, our own accounts) and keep it in the name book.
@@ -299,9 +348,9 @@ Item {
     /// The choice on the first screen: what the person came to do. Once connected it also opens that tab.
     function pickRole(role) {
         guideRole = role
-        if (connected) tab = role === "pay" ? "pay" : "receive"
+        if (connected) tab = role === "pay" ? "pay" : (claimableSchedules.length || !unvestedSchedules.length ? "claimable" : "unvested")
     }
-    onTabChanged: if (tab !== "settings") guideRole = tab === "pay" ? "pay" : "receive"
+    onTabChanged: { if (tab !== "settings") guideRole = tab === "pay" ? "pay" : "receive"; confirm = null }
 
     /// The module builds the claim call; the person sees it here, then approves it in their
     /// wallet. Claims go to the schedule's (public) beneficiary account.
@@ -498,18 +547,45 @@ Item {
 
     Rectangle { anchors.fill: parent; color: look.slate }
 
+    // ── The left menu (a wide window) ─────────────────────────────────────────────────
+    Rectangle {
+        id: sideMenu
+        visible: root.wide && root.menuShown
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+        width: visible ? 216 : 0
+        color: look.card
+        Rectangle { anchors { right: parent.right; top: parent.top; bottom: parent.bottom } width: 1; color: look.line }
+        ColumnLayout {
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 14; rightMargin: 14; topMargin: 40 }
+            spacing: 6
+            Text { textFormat: Text.PlainText; text: "Vest"; color: look.dim; font.family: look.sans; font.pixelSize: look.px(14); font.weight: Font.DemiBold; Layout.leftMargin: 10; Layout.bottomMargin: 6 }
+            Repeater {
+                model: root.menu
+                delegate: MenuItem {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    label: modelData.label
+                    count: modelData.count
+                    active: root.tab === modelData.key
+                    onPressed: root.tab = modelData.key
+                }
+            }
+            Link { look: root.look; Layout.leftMargin: 10; Layout.topMargin: 10; visible: root.connected; text: root.loading ? "Reading…" : "Refresh"; onPressed: if (!root.loading) root.refresh() }
+        }
+    }
+
     Flickable {
         id: page
-        anchors.fill: parent
+        anchors { left: sideMenu.visible ? sideMenu.right : parent.left; right: parent.right; top: parent.top; bottom: parent.bottom }
         contentHeight: column.implicitHeight + 80
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
         ColumnLayout {
             id: column
-            x: root.width >= 600 ? look.edge : 24
+            x: sideMenu.visible ? 40 : page.width >= 600 ? look.edge : 24
             y: 40
-            width: Math.min(root.width - 2 * x, look.pageWidth)
+            width: Math.min(page.width - 2 * x, look.pageWidth)
             spacing: 16
 
             RowLayout {
@@ -627,48 +703,135 @@ Item {
                 }
             }
 
-            RowLayout {
-                visible: root.connected || root.tab === "settings"
+            // A narrow window: the menu as a row at the top.
+            Flow {
+                visible: !root.wide && root.menuShown
                 Layout.fillWidth: true
                 spacing: 8
-                Tab { label: "Receive"; active: root.tab === "receive"; onPressed: root.tab = "receive" }
-                Tab { label: "Pay out"; active: root.tab === "pay"; onPressed: root.tab = "pay" }
-                Tab { label: "Settings"; active: root.tab === "settings"; onPressed: root.tab = "settings" }
-                Item { Layout.fillWidth: true }
+                Repeater {
+                    model: root.menu
+                    delegate: MenuItem {
+                        required property var modelData
+                        label: modelData.label
+                        count: modelData.count
+                        active: root.tab === modelData.key
+                        inline: true
+                        onPressed: root.tab = modelData.key
+                    }
+                }
                 Link { look: root.look; visible: root.connected; text: root.loading ? "Reading…" : "Refresh"; onPressed: if (!root.loading) root.refresh() }
             }
 
-            // ── Receive ─────────────────────────────────────────────────────────────
+            // Looking for schedules on the chain: a quiet line, and one when new ones arrive.
+            Text {
+                textFormat: Text.PlainText
+                visible: root.connected && root.scanText !== ""
+                Layout.fillWidth: true
+                text: root.scanText
+                color: look.dim
+                font.family: look.sans
+                font.pixelSize: look.px(14)
+                wrapMode: Text.Wrap
+            }
+            Text {
+                textFormat: Text.PlainText
+                visible: root.connected && root.scanProblem !== ""
+                Layout.fillWidth: true
+                text: "Couldn't look for schedules on the chain just now (" + Logic.clean(root.scanProblem) + "). Vest tries again in a minute."
+                color: look.dim
+                font.family: look.sans
+                font.pixelSize: look.px(14)
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                visible: root.connected && root.newText !== ""
+                Layout.fillWidth: true
+                spacing: 12
+                Text { textFormat: Text.PlainText; Layout.fillWidth: true; text: root.newText; color: look.ink; font.family: look.sans; font.pixelSize: look.px(15); font.weight: Font.DemiBold; wrapMode: Text.Wrap }
+                Link { look: root.look; text: "Hide"; onPressed: root.newFound = [] }
+            }
+
+            // ── Claimable and Unvested: schedules paying you ────────────────────────────
             Card {
-                visible: root.tab === "receive" && root.connected && root.recipientSchedules.length === 0
-                Heading { text: "No schedules for your accounts yet" }
-                Body { text: "A schedule shows up here once someone pays you through Vest and you add it. Ask the person paying you for the schedule code (Vest gives it to them), or for their LNS name, and paste it below." }
-                ImportRow {}
+                visible: root.tab === "claimable" && root.connected && root.claimableSchedules.length === 0
+                Heading { text: "Nothing to claim right now" }
+                Body {
+                    text: root.unvestedSchedules.length > 0
+                        ? Logic.grouped(String(root.unvestedSchedules.length)) + (root.unvestedSchedules.length === 1 ? " schedule pays you later" : " schedules pay you later") + ": see Unvested for when."
+                        : "When a schedule paying you has unlocked tokens, it shows up here. Vest finds schedules paying your accounts on the chain by itself."
+                }
+            }
+            Card {
+                visible: root.tab === "unvested" && root.connected && root.unvestedSchedules.length === 0 && root.closedSchedules.length === 0
+                Heading { text: "No schedules on their way to you" }
+                Body { text: "Vest looks on the chain for schedules paying your accounts and lists them here until they unlock. If someone set one up for you and it isn't here, add it with its schedule code below." }
             }
 
             Card {
-                visible: root.tab === "receive" && root.recipientSchedules.length > 0
-                Heading { text: "Your schedules" }
+                visible: root.tab === "claimable" && root.claimableSchedules.length > 0
+                Heading { text: "Ready to claim" }
                 Repeater {
-                    model: root.recipientSchedules
+                    model: root.tab === "claimable" ? root.claimableSchedules : []
                     delegate: Choice {
                         required property var modelData
                         Layout.fillWidth: true
-                        label: Logic.scheduleTitle(modelData)
+                        label: Logic.scheduleTitle(modelData) + " from " + Logic.fromName(modelData, root.names)
                         detail: Logic.rowState(modelData)
-                        chosen: String(root.recipientId) === String(modelData.id)
+                        chosen: !!root.selected && String(root.selected.id) === String(modelData.id)
                         onPressed: { root.recipientId = modelData.id; root.confirm = null }
                     }
                 }
             }
 
             Card {
-                visible: root.tab === "receive" && root.selected !== null
+                visible: root.tab === "unvested" && root.unvestedSchedules.length > 0
+                Heading { text: "Still unvested" }
+                Body { text: "These pay you later: nothing to claim yet." }
+                Repeater {
+                    model: root.tab === "unvested" ? root.unvestedSchedules : []
+                    delegate: Choice {
+                        required property var modelData
+                        readonly property var row: Logic.unvestedRow(modelData, root.names, root.viewTime())
+                        Layout.fillWidth: true
+                        label: row.label
+                        detail: row.detail
+                        chosen: !!root.selected && String(root.selected.id) === String(modelData.id)
+                        onPressed: { root.recipientId = modelData.id; root.confirm = null }
+                    }
+                }
+            }
+
+            Card {
+                visible: root.tab === "unvested" && root.closedSchedules.length > 0
+                Heading { text: "Finished" }
+                Body { text: "Fully claimed, or cancelled with nothing left to claim." }
+                Repeater {
+                    model: root.tab === "unvested" ? root.closedSchedules : []
+                    delegate: Choice {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        label: Logic.scheduleTitle(modelData) + " from " + Logic.fromName(modelData, root.names)
+                        detail: Logic.rowState(modelData)
+                        chosen: !!root.selected && String(root.selected.id) === String(modelData.id)
+                        onPressed: { root.recipientId = modelData.id; root.confirm = null }
+                    }
+                }
+            }
+
+            Card {
+                visible: root.receiving && root.selected !== null
                 Heading { text: root.selected ? "Schedule " + root.selected.id : "" }
                 Body { visible: !!root.selected && Logic.isClosed(root.selected); text: root.selected ? Logic.statusLine(root.selected) : ""; color: look.ink }
+                Body {
+                    visible: !!root.selected && Logic.receiveCategory(root.selected) === "unvested"
+                    text: root.selected ? Logic.untilLine(root.selected, root.viewTime()) : ""
+                    color: look.ink
+                    font.weight: Font.DemiBold
+                }
+                FactRow { look: root.look; key: "Total"; visible: !!root.selected && Logic.receiveCategory(root.selected) === "unvested"; value: root.selected ? root.selected.total_display : "" }
                 FactRow {
                     look: root.look; key: "Claimable now"
-                    visible: !!root.selected && (!Logic.isClosed(root.selected) || Logic.above(root.selected.claimable || "0", "0"))
+                    visible: !!root.selected && Logic.receiveCategory(root.selected) === "claimable"
                     value: root.selected ? root.selected.claimable_display + (root.selected.cancelled ? " (unlocked before the cancel)" : "") : ""
                 }
                 FactRow { look: root.look; key: "Claimed"; value: root.selected ? root.selected.claimed_display + (root.selected.cancelled ? "" : " of " + root.selected.total_display) : "" }
@@ -692,7 +855,7 @@ Item {
 
                 // Claim: where to, then the confirmation.
                 ColumnLayout {
-                    visible: !!root.selected && !Logic.isFinished(root.selected) && root.confirm === null
+                    visible: !!root.selected && Logic.receiveCategory(root.selected) === "claimable" && root.confirm === null
                     Layout.fillWidth: true
                     Layout.topMargin: 8
                     spacing: 10
@@ -728,7 +891,7 @@ Item {
             }
 
             Card {
-                visible: root.tab === "receive" && root.canWrite && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
+                visible: root.receiving && root.canWrite && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
                 Heading { text: "Hand this schedule to someone else" }
                 Body { text: "This schedule was made transferable: what is still locked can go to another account." }
                 Field { id: transferField; look: root.look; Layout.fillWidth: true; hint: "Who receives it: address or LNS name" }
@@ -740,14 +903,14 @@ Item {
             }
 
             Card {
-                visible: root.tab === "receive" && root.recipientSchedules.length > 0
-                Heading { text: "Add a schedule" }
-                Body { text: "Someone set up another schedule for you? Paste its schedule code, or the LNS name of the person paying you." }
+                visible: root.tab === "unvested" && root.connected
+                Heading { text: "Add a schedule by code" }
+                Body { text: "Schedules paying your accounts show up by themselves. One missing? Paste the schedule code the person paying you has (Vest shows it to them after they create it)." }
                 ImportRow {}
             }
 
             TechDetails {
-                visible: root.tab === "receive" && root.selected !== null
+                visible: root.receiving && root.selected !== null
                 look: root.look
                 summary: root.selected && root.selected.address ? "Schedule " + Logic.short(root.selected.address) : ""
                 FactRow { look: root.look; key: "Schedule code"; value: root.selected && root.selected.address ? root.selected.address : ""; monospace: true }
@@ -1200,20 +1363,41 @@ Item {
         MouseArea { id: ciArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: ci.pressed() }
     }
 
-    component Tab: Rectangle {
-        id: tabButton
+    // One entry of the menu: a label and, for Claimable and Unvested, a count. `inline`: in the
+    // narrow window's row at the top.
+    component MenuItem: Rectangle {
+        id: item
         property string label: ""
+        property int count: -1
         property bool active: false
+        property bool inline: false
         signal pressed()
-        implicitWidth: tabText.implicitWidth + 28
-        implicitHeight: 36
+        implicitWidth: itemRow.implicitWidth + 24
+        implicitHeight: inline ? 36 : 40
         radius: 6
-        color: tabButton.active ? root.look.card : (tabArea.containsMouse ? root.look.raised : "transparent")
-        border.width: 1
-        border.color: tabButton.active ? root.look.brass : root.look.line
+        color: item.active ? root.look.raised : (itemArea.containsMouse ? root.look.raised : "transparent")
+        border.width: item.inline || item.activeFocus ? 1 : 0
+        border.color: item.active || item.activeFocus ? root.look.brass : root.look.line
         activeFocusOnTab: true
-        Keys.onSpacePressed: tabButton.pressed()
-        Text { id: tabText; textFormat: Text.PlainText; anchors.centerIn: parent; text: tabButton.label; color: tabButton.active ? root.look.ink : root.look.dim; font.family: root.look.sans; font.pixelSize: root.look.px(16); font.weight: Font.DemiBold }
-        MouseArea { id: tabArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: tabButton.pressed() }
+        Accessible.role: Accessible.Button
+        Accessible.name: item.label + (item.count > 0 ? ", " + item.count : "")
+        Keys.onSpacePressed: item.pressed()
+        Keys.onReturnPressed: item.pressed()
+        Rectangle { visible: item.active && !item.inline; anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 8; bottomMargin: 8 } width: 3; radius: 1; color: root.look.brass }
+        RowLayout {
+            id: itemRow
+            anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+            spacing: 8
+            Text { textFormat: Text.PlainText; Layout.fillWidth: !item.inline; text: item.label; color: item.active ? root.look.ink : root.look.dim; font.family: root.look.sans; font.pixelSize: root.look.px(16); font.weight: Font.DemiBold; elide: Text.ElideRight }
+            Rectangle {
+                visible: item.count > 0
+                implicitWidth: Math.max(implicitHeight, badge.implicitWidth + 12)
+                implicitHeight: root.look.px(20)
+                radius: height / 2
+                color: root.look.brass
+                Text { id: badge; anchors.centerIn: parent; textFormat: Text.PlainText; text: String(item.count); color: root.look.slate; font.family: root.look.sans; font.pixelSize: root.look.px(13); font.weight: Font.DemiBold }
+            }
+        }
+        MouseArea { id: itemArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: item.pressed() }
     }
 }
