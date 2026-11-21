@@ -183,7 +183,7 @@ check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "F
 check("names write words", [L.writeWhat("create"), L.writeWhat("cancel:3"), L.writeWhat("signal:3:1"), L.writeWhat("x")], ["the new schedule", "the cancel", "the milestone", "the request"]);
 check("hex accounts show as base58", [L.base58Of("11".repeat(32)), L.base58Of("00".repeat(31) + "01"), L.base58Of("Public/x")], ["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", "1".repeat(31) + "2", "Public/x"]);
 check("names: an unreadable answer is unclear (a read is asked again; a proposal never)", SDK.reply("<html>").unclear, true);
-const FOUND = { ok: true, name: "alice", display: "alice.lez", account: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z", forwardedFrom: null, lapsed: false };
+const FOUND = { ok: true, name: "alice", display: "alice", account: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z", forwardedFrom: null, lapsed: false };
 check("payee through Names: a name shows who and the address", [L.payeeFromNames("alice", FOUND).ok, L.payeeFromNames("alice", FOUND).text], [true, "Pays alice · FLBC4V…BE2Z"]);
 check("payee through Names: a forward says where it points", L.payeeFromNames("old", { ...FOUND, forwardedFrom: "old" }).text, "Pays old (it points to alice) · FLBC4V…BE2Z");
 check("payee through Names: unknown, no account, can't check", [
