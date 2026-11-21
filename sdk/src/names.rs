@@ -373,8 +373,17 @@ mod tests {
             "getAccountView",
             json!({ "data": { "actor_states": { program: Vec::<u8>::new() } } }),
         );
+        rpc.push_ok("getAccountView", json!(null));
         let client = Client::new(rpc);
         let mut book = NameBook::default();
+        assert_eq!(
+            resolve(Some(&client), Some(lns), &mut book, "nobody", 0).unwrap_err(),
+            NameError::UnknownName {
+                name: "nobody".into()
+            }
+        );
+
+        // A name nobody registered: its record account doesn't exist, the RPC answers null.
         assert_eq!(
             resolve(Some(&client), Some(lns), &mut book, "nobody", 0).unwrap_err(),
             NameError::UnknownName {

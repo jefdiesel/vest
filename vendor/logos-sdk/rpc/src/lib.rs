@@ -412,6 +412,11 @@ impl Client {
             "getAccountView",
             json!([{ "account_id": account, "program_account_id": program }]),
         )?;
+        // An account nothing ever wrote to (e.g. an LNS name nobody registered) comes back as
+        // `null`: it has no state for any program.
+        if value.is_null() {
+            return Ok(Vec::new());
+        }
         let states = value
             .get("data")
             .and_then(|data| data.get("actor_states"))
