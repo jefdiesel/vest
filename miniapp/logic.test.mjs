@@ -375,3 +375,9 @@ check("zoneProblem: no zone or no chain to compare", [
   L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7")
 ], ["", "", ""]);
 
+
+// QML's JavaScript engine (V4) has no BigInt: a BigInt literal makes the whole file fail to load in Basecamp.
+{
+  const src = readFileSync(new URL("./qml/logic.mjs", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
+  check("logic.mjs has no BigInt literals (QML can't parse them)", /\b\d+n\b/.test(src), false);
+}

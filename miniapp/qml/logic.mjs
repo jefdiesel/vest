@@ -376,9 +376,18 @@ var B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 export function base58Of(account) {
     var s = String(account == null ? "" : account)
     if (!/^[0-9a-fA-F]{64}$/.test(s)) return s
-    var n = BigInt("0x" + s), out = ""
-    while (n > 0n) { out = B58[Number(n % 58n)] + out; n = n / 58n }
-    for (var i = 0; i < 64 && s.substr(i, 2) === "00"; i += 2) out = "1" + out
+    // Plain-number long division over the bytes: QML's JavaScript engine has no BigInt.
+    var bytes = []
+    for (var i = 0; i < 64; i += 2) bytes.push(parseInt(s.substr(i, 2), 16))
+    var digits = []
+    for (var b = 0; b < bytes.length; b++) {
+        var carry = bytes[b]
+        for (var d = 0; d < digits.length; d++) { carry += digits[d] * 256; digits[d] = carry % 58; carry = Math.floor(carry / 58) }
+        while (carry > 0) { digits.push(carry % 58); carry = Math.floor(carry / 58) }
+    }
+    var out = ""
+    for (var k = digits.length - 1; k >= 0; k--) out += B58[digits[k]]
+    for (var z = 0; z < bytes.length && bytes[z] === 0; z++) out = "1" + out
     return out
 }
 
