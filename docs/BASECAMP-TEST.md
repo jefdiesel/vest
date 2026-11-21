@@ -22,14 +22,15 @@ A recorded run of an older Vest (wallet-folder signing, removed since, 2026-11-2
   (built `--features lez`, its own wallet folder), with your Names account as the beneficiary and
   a start date in the past.
 
-Amounts in the app are in LEZ; dates are `yyyy-mm-dd` (midnight UTC).
+Amounts in the app are in LEZ; dates are picked in a calendar (day, hour and minute in your local
+time), not typed as `yyyy-mm-dd`.
 
 ## 1. Install
 
 1. Basecamp, Package Manager, **Install Local Package**: `vesting-<version>.lgx` first, then
    `vesting_ui-<version>.lgx`.
 2. The sidebar shows Vest's icon (orange, a white **v**). Open **Vest**. Expected: the header
-   "Vest · Pay tokens out over time, or claim what has vested to you · Runs on Bridge test
+   "Vest · Pay tokens out over time, or claim what has unlocked for you · Runs on Bridge test
    network", then **What do you want to do?** with *Claim tokens sent to me* chosen and five
    numbered steps; step 1 **Connect Names Wallet** holds a **Connect** button. No red text.
 3. If it says the Vest module isn't installed, the core module didn't load: stop and collect
@@ -48,14 +49,21 @@ Amounts in the app are in LEZ; dates are `yyyy-mm-dd` (midnight UTC).
 ## 3. Receive: a public claim through Names Wallet
 
 1. **Receive**. Your schedules are listed (or "No schedules for your accounts yet": paste the
-   schedule's address under **Add schedule**). Choose one.
-2. The facts: Claimable now, Claimed, Still locked, Next, From. Press **Check claim**. Expected:
+   **schedule code** under **Add schedule**). Choose one.
+2. The facts: Claimable now, Claimed, Still locked, Next, From. On **From**, **Show** reveals the
+   full address, **Copy** copies it and **Open in Names** opens it in Names Wallet. The **Schedule
+   code** row has **Copy schedule code**. Press **Check claim**. Expected:
    "Checking…", then **Claim … LEZ?** with To (your account, public) and the fee line.
 3. **Claim in Names Wallet**. Expected: Names opens with the call (the Vest program, its label from
    the Program Registry, the fee note); approve it. Vest shows "Waiting for you to approve…", then
    "Claimed … LEZ · tx …" and "What happens next: …"; Claimed goes up.
 4. A schedule with nothing unlocked: **Check claim** says when the next part unlocks; nothing is
    sent.
+
+4. Paste an LNS name under **Add schedule** instead of a schedule code. Expected: a plain reason,
+   "... is a person's LNS name, not a schedule. Ask them for the schedule code (Vest shows it
+   after they create it) and paste that here." An address that is not a schedule gets the same
+   plain kind of answer.
 
 ## 4. The payout box
 
@@ -72,9 +80,17 @@ Typing in the amount and milestone boxes goes in whole (each keystroke lands whe
 With Names older than 0.18, **Create** is off and says why above the button. Each step below
 opens Names with the call; choose the account it names and approve; Names brings you back.
 
-1. **Pay out**, **Evenly over time**, start yesterday, fully unlocked in two days, *Who receives it*
-   your Names account, **How much** `0.001`, **Create schedule**. Expected: "In Names Wallet,
-   choose … and approve.", then "Created schedule N · … · tx …" and what to share with them.
+1. **Pay out**, **Evenly**, pick yesterday in the calendar for **Starts** and two days on for
+   **Fully unlocked**, *Who receives it* your Names account, **How much** `0.001`, **Create
+   schedule**. Before Names opens, Vest checks the paying account's balance; if it cannot cover
+   `0.001` LEZ, the expected line is "This schedule needs … LEZ, and the paying account holds …
+   LEZ. Lower the amount, or add LEZ to the account first.", and no wallet opens. Otherwise
+   expect "In Names Wallet, choose … and approve.", then "Created schedule N · … · tx …".
+   The **receipt** card opens after the create: **Amount**, **From**, **Receives**, **Plan**,
+   **Rules**, **Transaction** and **Schedule code**, with **Show** / **Copy** on rows that have a
+   full address, the line "Send them the schedule code (Copy schedule code, below): in their Vest
+   they open Receive, paste it and press Add schedule.", a **Done** button and **Copy schedule
+   code**. Press **Copy schedule code** and check the clipboard holds the full code.
 2. **Milestones**: two milestones `0.0003` and `0.0007`, **Create schedule**. Under *Schedules you
    manage*: **Unlock milestone 1**; it disappears and that part becomes claimable.
 3. **Cancel schedule** on the milestone schedule: the confirmation says it can't be undone;

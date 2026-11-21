@@ -1,5 +1,8 @@
 # Vest mini-app for Basecamp
 
+The current packages are `vesting_ui` 0.5.8 and `vesting` 0.4.0 on macOS Apple silicon. Linux is
+to be rebuilt once from the final Mac version.
+
 Two Basecamp packages:
 
 | Package | Folder | What it is |
@@ -60,7 +63,7 @@ unless it is local (`127.0.0.1`).
 ## Build and test
 
 ```sh
-node --test miniapp/logic.test.mjs                 # the view's logic (121 tests)
+node --test miniapp/logic.test.mjs                 # the view's logic
 cargo test -p vesting-module-core                  # every module call on the JSON test ledger (13 tests)
 cargo build -p vesting-module-core --features lez  # the chain build of the module's core
 ```
@@ -83,14 +86,14 @@ loads: it lists every undefined symbol nothing provides (the plugin links with
 `-undefined dynamic_lookup`, so a missing library only shows at load) and dlopens it.
 
 `tools/render.py` renders `qml/Main.qml` offscreen at 1250x700 with a stand-in vesting module,
-wallet and package list (27 scenarios: first run, connecting, Names missing or on another
+wallet and package list (31 scenarios: first run, connecting, Names missing or on another
 network, no wallet installed, a wallet that speaks another SDK version, two wallets to choose
 from and the choice in Settings, the guides, no schedules, a schedule, a claim waiting in Names and its result, create, the payout box's
 lookup of an address and of a name through Names, the cancel confirmation, settings, an old
 wallet-folder setting) and fails on any QML error.
 
-The screen uses the shared kit in `qml/kit/` (Look, Action, PageHeader, Field, FactRow,
-TechDetails, Tick, Link, RunsOn, BackButton), copied unchanged from the Program Registry browser
+The screen uses the shared kit in `qml/kit/` (Look, Action, PageHeader, Field, DateTimeField,
+FactRow, TechDetails, Tick, Link, RunsOn, BackButton), copied unchanged from the Program Registry browser
 (jefdiesel/lez-program-registry `guide-ui`, `registry_browser/qml/kit/`): one left-aligned column
 at most 680 px wide, 56 px from the window's edge, as in the Names Wallet.
 
@@ -101,8 +104,8 @@ at most 680 px wide, 56 px from the window's edge, as in the Names Wallet.
   `create_batch`, `claim_private` and wallet-folder calls stay for the CLI and its tests; the app
   never calls them).
 - The module answers one call at a time.
-- Schedule ids are local to the module's data folder; a beneficiary on another machine imports
-  the schedule account (Recipient tab, Import).
+- Schedule ids are local to the module's data folder; a beneficiary on another machine pastes the
+  **schedule code** under **Receive**, **Add schedule**. An LNS name cannot find a schedule yet.
 - Display maths use the module's chain time and match `vesting-core` exactly (fixed cases from
   `core/tests/unit.rs` in the Node tests; a decimal-limb fallback where QML has no BigInt).
 - Only the beneficiary address is public at creation (as the RFP specifies); commitment-based
