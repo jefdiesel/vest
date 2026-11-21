@@ -200,6 +200,9 @@ check("namesAccounts joins balances", L.namesAccounts({ accounts: [{ account: "P
 check("guide: receiving, five one-line steps, current marked", L.guideSteps("receive", 2).map(s => s.state), ["done", "done", "now", "later", "later"]);
 check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "Share the schedule's address or your LNS name with them", "Cancel it, or make it permanent, later if you need to"]);
 check("guide: every step says what to do", ["receive", "pay"].every(r => L.guideSteps(r, 0).every(x => typeof x.detail === "string" && x.detail.length > 20)), true);
+check("payee: a name shows who and the address", L.payeeLine("alice", { ok: true, name: "alice", base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).ok, true);
+check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error: "unknown LNS name: nobdy" }).text.startsWith("No one holds the LNS name nobdy"), true);
+check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).text.startsWith("Pays the address"), true);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);

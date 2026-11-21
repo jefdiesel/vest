@@ -613,6 +613,22 @@ export function hostOf(url) {
     return m ? m[1] : String(url == null ? "" : url)
 }
 
+// ── Who gets paid ───────────────────────────────────────────────────────────────────
+
+/// What the payout box resolved to, as the line under it: `resolve_name`'s answer `{ok, name,
+/// base58}` or its error. `{ok, text}`; ok false means Vest can't pay what was typed.
+export function payeeLine(typed, r) {
+    var t = String(typed == null ? "" : typed).trim()
+    if (r && r.ok && r.base58) {
+        var addr = short(r.base58)
+        return { ok: true, text: r.name ? "Pays " + clean(r.name) + " · " + addr : "Pays the address " + addr + "." }
+    }
+    var why = String((r && r.error) || "")
+    if (/unknown LNS name|not registered|no such name/i.test(why)) return { ok: false, text: "No one holds the LNS name " + clean(t) + ". Check the spelling, or paste their address." }
+    if (/rate|429|busy|timed out|network|connect/i.test(why)) return { ok: false, retry: true, text: "Couldn't check " + clean(t) + " just now: " + clean(why) }
+    return { ok: false, text: "That isn't an address or an LNS name Vest can find" + (why ? ": " + clean(why) : ".") }
+}
+
 // ── Names Wallet ────────────────────────────────────────────────────────────────────
 
 export const NAMES_MISSING = "Names Wallet isn't installed, or isn't open. Install Names from Basecamp's app list, open it once, then come back here."

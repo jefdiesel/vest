@@ -69,6 +69,11 @@ Item {
     property bool cTransferable: false
     property var cTranches: [""]
     property var bRows: [ { beneficiary: "", amount: "", tranches: "" } ]
+    // The rows above are changed in place while typing (a new array would rebuild the fields under
+    // the cursor, one character at a time); these counts rebuild them only on add and remove.
+    property int trancheCount: 1
+    property int rowCount: 1
+    property var payee: null                   // the payout box, checked: {ok, text} or null
 
     // ── Derived ─────────────────────────────────────────────────────────────────────
     readonly property var recipientSchedules: schedules.filter(function(s) { return s.mine.beneficiary })
@@ -439,8 +444,22 @@ Item {
         }
     }
 
+    /// Look up what was typed in the payout box (an LNS name or an address) and say who it is.
+    function checkPayee() {
+        var t = beneficiaryField.text.trim()
+        if (t === "") { payee = null; return }
+        payee = { ok: false, checking: true, text: "Checking " + t + "…" }
+        call("resolve_name", [t], function(r) {
+            if (beneficiaryField.text.trim() !== t) return
+            payee = Logic.payeeLine(t, r)
+        }, 30000)
+    }
+
+    Timer { id: payeeTimer; interval: 700; onTriggered: root.checkPayee() }
+
     function doCreate() {
         if (cCreator === "") { say("Choose which of your accounts pays.", true); return }
+        if (!root.batchMode && root.payee && !root.payee.ok && !root.payee.checking) { say(root.payee.text, true); return }
         var p = sharedParams()
         p.beneficiary = beneficiaryField.text.trim()
         p.amount = amountOf(amountField.text)
@@ -841,11 +860,22 @@ Item {
                     Layout.fillWidth: true
                     spacing: 6
                     Label { text: "Who receives it" }
-                    Field { id: beneficiaryField; look: root.look; Layout.fillWidth: true; hint: "Their address or LNS name" }
+                    Field { id: beneficiaryField; look: root.look; Layout.fillWidth: true; hint: "Their address or LNS name"; onTextChanged: { root.payee = null; payeeTimer.restart() } }
+                    Text {
+                        textFormat: Text.PlainText
+                        visible: root.payee !== null
+                        Layout.fillWidth: true
+                        text: root.payee ? root.payee.text : ""
+                        color: !root.payee || root.payee.checking ? look.dim : root.payee.ok ? look.ink : look.alarm
+                        font.family: look.sans
+                        font.pixelSize: look.px(14)
+                        font.weight: root.payee && root.payee.ok ? Font.DemiBold : Font.Normal
+                        wrapMode: Text.Wrap
+                    }
                     Label { visible: root.cKind !== "milestone"; text: "How much" }
                     Field { id: amountField; look: root.look; visible: root.cKind !== "milestone"; Layout.fillWidth: true; hint: Logic.isNative(tokenField.text) ? "LEZ, e.g. 1000" : "In the token's smallest unit" }
                     Repeater {
-                        model: root.cKind === "milestone" ? root.cTranches : []
+                        model: root.cKind === "milestone" ? root.trancheCount : 0
                         delegate: RowLayout {
                             required property int index
                             Layout.fillWidth: true
@@ -855,12 +885,12 @@ Item {
                                 Layout.fillWidth: true
                                 hint: "Milestone " + (index + 1) + (Logic.isNative(tokenField.text) ? ": LEZ" : "")
                                 text: root.cTranches[index]
-                                onTextChanged: if (text !== root.cTranches[index]) { var next = root.cTranches.slice(); next[index] = text; root.cTranches = next }
+                                onTextChanged: root.cTranches[index] = text
                             }
-                            Link { look: root.look; visible: root.cTranches.length > 1; text: "Remove"; onPressed: { var next = root.cTranches.slice(); next.splice(index, 1); root.cTranches = next } }
+                            Link { look: root.look; visible: root.trancheCount > 1; text: "Remove"; onPressed: { root.cTranches.splice(index, 1); root.trancheCount = root.cTranches.length } }
                         }
                     }
-                    Link { look: root.look; visible: root.cKind === "milestone"; text: "Add a milestone"; onPressed: { var next = root.cTranches.slice(); next.push(""); root.cTranches = next } }
+                    Link { look: root.look; visible: root.cKind === "milestone"; text: "Add a milestone"; onPressed: { root.cTranches.push(""); root.trancheCount = root.cTranches.length } }
                 }
                 ColumnLayout {
                     visible: root.batchMode
@@ -868,9 +898,8 @@ Item {
                     spacing: 8
                     Body { text: root.cKind === "milestone" ? "One row per person: their address or LNS name, and their milestone amounts separated by commas." : "One row per person: their address or LNS name, and how much. Up to 140 people in one transaction." }
                     Repeater {
-                        model: root.bRows
+                        model: root.rowCount
                         delegate: RowLayout {
-                            required property var modelData
                             required property int index
                             Layout.fillWidth: true
                             spacing: 8
@@ -879,28 +908,21 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 3
                                 hint: "Person " + (index + 1) + ": address or LNS name"
-                                text: modelData.beneficiary
-                                onTextChanged: if (text !== root.bRows[index].beneficiary) { var next = root.bRows.slice(); next[index] = Object.assign({}, next[index], { beneficiary: text }); root.bRows = next }
+                                text: root.bRows[index].beneficiary
+                                onTextChanged: root.bRows[index].beneficiary = text
                             }
                             Field {
                                 look: root.look
                                 Layout.fillWidth: true
                                 Layout.preferredWidth: 2
                                 hint: root.cKind === "milestone" ? "e.g. 400, 600" : "LEZ"
-                                text: root.cKind === "milestone" ? modelData.tranches : modelData.amount
-                                onTextChanged: {
-                                    var key = root.cKind === "milestone" ? "tranches" : "amount"
-                                    if (text === root.bRows[index][key]) return
-                                    var next = root.bRows.slice(), patch = {}
-                                    patch[key] = text
-                                    next[index] = Object.assign({}, next[index], patch)
-                                    root.bRows = next
-                                }
+                                text: root.cKind === "milestone" ? root.bRows[index].tranches : root.bRows[index].amount
+                                onTextChanged: root.bRows[index][root.cKind === "milestone" ? "tranches" : "amount"] = text
                             }
-                            Link { look: root.look; visible: root.bRows.length > 1; text: "Remove"; onPressed: { var next = root.bRows.slice(); next.splice(index, 1); root.bRows = next } }
+                            Link { look: root.look; visible: root.rowCount > 1; text: "Remove"; onPressed: { root.bRows.splice(index, 1); root.rowCount = root.bRows.length } }
                         }
                     }
-                    Link { look: root.look; text: "Add a person"; onPressed: { var next = root.bRows.slice(); next.push({ beneficiary: "", amount: "", tranches: "" }); root.bRows = next } }
+                    Link { look: root.look; text: "Add a person"; onPressed: { root.bRows.push({ beneficiary: "", amount: "", tranches: "" }); root.rowCount = root.bRows.length } }
                 }
 
                 Tick { look: root.look; checked: root.cCancelable; text: "You can cancel it later"; onToggled: root.cCancelable = !root.cCancelable }
@@ -921,10 +943,15 @@ Item {
                     Field { id: milestoneAuthField; look: root.look; Layout.fillWidth: true; hint: "Address or LNS name" }
                 }
 
+                Body {
+                    visible: !root.walletMode
+                    color: look.ink
+                    text: "Create is off for now: Names Wallet can't sign a new schedule yet (that update is being built). To pay out today, use a wallet folder: Settings, Advanced."
+                }
                 Action {
                     look: root.look; strong: true; changes: true; busy: root.busy
                     enabledNow: root.walletMode
-                    label: root.batchMode ? "Create " + root.bRows.length + " schedules" : "Create schedule"
+                    label: root.batchMode ? "Create " + root.rowCount + " schedules" : "Create schedule"
                     busyLabel: "Creating…"; working: root.workingOn === "create" || root.workingOn === "batch"
                     onPressed: root.batchMode ? root.doBatch() : root.doCreate()
                 }
