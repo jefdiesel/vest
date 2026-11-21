@@ -625,6 +625,7 @@ export function payeeLine(typed, r) {
     }
     var why = String((r && r.error) || "")
     if (/unknown LNS name|not registered|no such name/i.test(why)) return { ok: false, text: "No one holds the LNS name " + clean(t) + ". Check the spelling, or paste their address." }
+    if (/publishes no account|has no owner/i.test(why)) return { ok: false, text: clean(t) + " is a registered LNS name, but it doesn't publish an account to pay. Ask them for their address, or to set one in Names Wallet." }
     if (/rate|429|busy|timed out|network|connect/i.test(why)) return { ok: false, retry: true, text: "Couldn't check " + clean(t) + " just now: " + clean(why) }
     return { ok: false, text: "That isn't an address or an LNS name Vest can find" + (why ? ": " + clean(why) : ".") }
 }

@@ -47,7 +47,7 @@ impl fmt::Display for NameError {
             NameError::ExpiredName { name, expires } => {
                 write!(f, "LNS name '{}' expired at {} ms", name, expires)
             }
-            NameError::NoOwner { name } => write!(f, "LNS name '{}' has no owner", name),
+            NameError::NoOwner { name } => write!(f, "LNS name '{}' publishes no account to pay", name),
             NameError::Rpc(message) => write!(f, "LNS lookup failed: {}", message),
         }
     }
@@ -194,8 +194,10 @@ pub fn resolve(
     let sealed = bytes
         .get(45..45 + sealed_len)
         .ok_or_else(|| NameError::Rpc("truncated name record profile".into()))?;
+    // A name whose holder published no profile (an empty or short sealed part) has no account
+    // to pay: Names Wallet reads it the same way.
     if sealed.len() < NONCE_LEN + TAG_LEN {
-        return Err(NameError::Rpc("bad sealed profile length".into()));
+        return Err(NameError::NoOwner { name });
     }
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&derived.key));
     let plain = cipher
