@@ -115,6 +115,12 @@
                 RAPIDSNARK_LIB_DIR = "${rapidsnark}";
                 PCSC_LIB_DIR = "${pcsc}/lib";
                 LBC_ROOT_DIR = "${circuits}";
+                # risc0's recursion circuit downloads its zkr archive in the same way; this is
+                # the file its build script names and checks (sha256 = the name).
+                RECURSION_SRC_PATH = "${pkgs.fetchurl {
+                  url = "https://risc0-artifacts.s3.us-west-2.amazonaws.com/zkr/744b999f0a35b3c86753311c7efb2a0054be21727095cf105af6ee7d3f4d8849.zip";
+                  sha256 = "744b999f0a35b3c86753311c7efb2a0054be21727095cf105af6ee7d3f4d8849";
+                }}";
               };
               # The plugin links PC/SC (CMakeLists.txt); the portable bundle then carries it.
               extraBuildInputs = [ pkgs.pcsclite ];
