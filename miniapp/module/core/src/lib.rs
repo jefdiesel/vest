@@ -1361,6 +1361,8 @@ impl Module {
             let mut found = Vec::new();
             let mut new_rows = Vec::new();
             let mut incoming = 0;
+            let mut imports = 0;
+            let mut imports_left = false;
             let candidates: Vec<(String, Schedule)> = state
                 .schedules
                 .iter()
@@ -1384,7 +1386,16 @@ impl Module {
                     state.imported.insert(address);
                     continue;
                 }
-                match backend.import_account(account) {
+                // An import reads the account once more: paced like the scan, a few per call.
+                if imports >= discover::IMPORTS_PER_CALL {
+                    imports_left = true;
+                    continue;
+                }
+                imports += 1;
+                pace.wait();
+                let imported = self.client()?.backend_mut().import_account(account);
+                pace.mark();
+                match imported {
                     Ok(id) => {
                         if pays_me {
                             found.push(json!(address));
@@ -1417,7 +1428,7 @@ impl Module {
                 "from_block": from_block,
                 "to_block": to_block,
                 "tip": tip,
-                "done": state.pending.is_empty() && state.next_block() > tip,
+                "done": state.pending.is_empty() && state.next_block() > tip && !imports_left,
                 "found": found,
                 "new": new_rows,
                 "incoming": incoming,

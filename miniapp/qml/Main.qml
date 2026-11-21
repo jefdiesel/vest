@@ -75,6 +75,8 @@ Item {
     property bool scanStarted: false
     property string scanProblem: ""
     property var newFound: []                  // schedules a scan added: [{id, address, creator}]
+    property bool scanFoundUnread: false       // a scan added schedules the list hasn't read yet
+    property real scanReadAt: 0                // when a scan last made the list read again (ms)
 
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
@@ -230,11 +232,19 @@ Item {
     /// last one answers, until the scan reaches the chain's tip; then again every minute. A
     /// schedule it adds is read with the rest (`list`), and said in one line.
     function discoverOnce() {
-        if (scanBusy || !connected) return
+        if (scanBusy) return
+        if (!connected) { scanTimer.restart(); return }
         scanBusy = true
         call("discover", ["2000"], function(r) {
             scanBusy = false
-            if (r.found && r.found.length) readChain()
+            // New schedules are read with the rest (`list`): when the scan is done, or at most
+            // every 30 s while it runs (each read asks the chain for every schedule).
+            if (r.found && r.found.length) scanFoundUnread = true
+            if (scanFoundUnread && (r.done || !r.ok || Date.now() - scanReadAt > 30000)) {
+                scanFoundUnread = false
+                scanReadAt = Date.now()
+                readChain()
+            }
             if (!r.ok) {
                 scanProblem = r.error || "no answer"
                 scanTimer.restart()

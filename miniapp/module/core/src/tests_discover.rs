@@ -501,3 +501,47 @@ fn status_words() {
     s.claimed = 100;
     assert_eq!(discover::status(&s, 3000), "closed");
 }
+
+#[test]
+fn imports_are_a_few_per_call() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = scan_module(&rpc, 38738);
+    give(&mut module, &[PAYEE]);
+    let program = id(PROGRAM);
+    // Seven known schedules paying 5g78o, already scanned up to the tip.
+    let mut state = discover::ScanState::fresh(CHAIN, &program, 38738);
+    state.last_block = Some(38738);
+    let p = vesting_core::CreateParams::linear(id(CREATOR), id(PAYEE), [0; 32], 1_000, 0, 1_000);
+    let schedule = vesting_core::create(p, 0).unwrap().0;
+    let answer = {
+        let full = vesting_program::ScheduleState {
+            version: 1, nonce: [9; 32], asset: vesting_program::Asset::Native,
+            schedule: Some(schedule.clone()), float: 0, per_claim: 0, pending: None,
+        };
+        json!({ "data": { "actor_states": { PROGRAM: borsh::to_vec(&full).unwrap() } } })
+    };
+    for i in 0..7u8 {
+        state.schedules.insert(
+            names::base58(&[40 + i; 32]),
+            discover::Known { schedule: hex::encode(borsh::to_vec(&schedule).unwrap()), native: true, block: 38738 },
+        );
+    }
+    state.save(&module.dir).unwrap();
+    start(&rpc, 38738);
+    for _ in 0..5 {
+        rpc.push_ok("getAccountView", answer.clone());
+    }
+    let first = parse(module.discover(""));
+    assert_eq!(first["found"].as_array().unwrap().len(), 5, "{first}");
+    assert_eq!(first["incoming"], 7);
+    assert_eq!(first["done"], false);
+    start(&rpc, 38738);
+    for _ in 0..2 {
+        rpc.push_ok("getAccountView", answer.clone());
+    }
+    let second = parse(module.discover(""));
+    assert_eq!(second["found"].as_array().unwrap().len(), 2, "{second}");
+    assert_eq!(second["done"], true);
+    assert_eq!(calls(&rpc, "getBlockRange").len(), 0);
+}

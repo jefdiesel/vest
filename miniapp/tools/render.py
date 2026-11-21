@@ -92,6 +92,9 @@ INCOMING = {"ok": True, "time": NOW, "names": {ME: "alice", BOB: "bob"}, "schedu
 ]}
 SCAN_DONE = {"ok": True, "chain_id": SETTINGS["network"]["chain_id"], "from_block": 45884, "to_block": 45883, "tip": 45883, "done": True, "found": [], "new": [], "incoming": 4, "known": 20, "pending": 0}
 SCAN_NEW = dict(SCAN_DONE, found=["7Ue2Wx…"], new=[{"id": 3, "address": "66" * 32, "creator": BOB}])
+# The app calls discover again until it is done: three answers not done, then the one that finds
+# a schedule. Only the fourth answer names bob, so the line shows only if the loop went on.
+SCAN_LOOP = [dict(SCAN_DONE, done=False, to_block=b, from_block=b - 1999) for b in (40699, 42699, 44699)] + [SCAN_NEW]
 
 # Each scenario: (vesting answers, names answers, script[, late script]). The late script runs
 # after the app's first reads and its first scan have answered. Names answers are values (wrapped
@@ -156,6 +159,8 @@ SCENARIOS = {
     "unvested-empty": ({"settings": DONE_GUIDE, "list": {"ok": True, "time": NOW, "names": {}, "schedules": []}}, WALLET_ON, "", "root.tab = 'unvested'"),
     "scanning": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "", "root.scan = { ok: true, from_block: 38700, to_block: 40699, tip: 45883, done: false }"),
     "new-schedule": ({"settings": DONE_GUIDE, "list": INCOMING, "discover": SCAN_NEW}, WALLET_ON, ""),
+    "scan-loop": ({"settings": DONE_GUIDE, "list": INCOMING, "__discover_seq": SCAN_LOOP}, WALLET_ON, ""),
+    "scan-problem": ({"settings": DONE_GUIDE, "list": INCOMING, "discover": {"ok": False, "error": "The network is busy (rate limited); try again in a minute"}}, WALLET_ON, ""),
     "narrow": ({"settings": DONE_GUIDE, "list": INCOMING, "discover": SCAN_NEW}, WALLET_ON, "root.width = 560"),
     "narrow-unvested": ({"settings": DONE_GUIDE, "list": INCOMING}, WALLET_ON, "root.width = 560", "root.tab = 'unvested'; root.recipientId = 3"),
     "chose-other-wallet": ({"settings": DONE_GUIDE}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]),
@@ -164,6 +169,7 @@ SCENARIOS = {
 
 BRIDGE = r"""
     width: 1250; height: %(height)s
+    property int renderDiscoverCalls: 0
     property var logos: QtObject {
         function callModuleAsync(module, method, args, callback, timeout) {
             var reply = callModule(module, method, args)
@@ -181,6 +187,10 @@ BRIDGE = r"""
                 return JSON.stringify(JSON.stringify(v === undefined ? { success: false, value: null, error: "not in this scenario" } : { success: true, value: v, error: null }))
             }
             if (module !== "vesting") return ""
+            if (method === "discover" && answers.__discover_seq) {
+                var seq = answers.__discover_seq
+                return JSON.stringify(JSON.stringify(seq[Math.min(root.renderDiscoverCalls++, seq.length - 1)]))
+            }
             var a = answers[method]
             // Basecamp may hand the module's JSON text encoded once more.
             return a === undefined ? JSON.stringify(JSON.stringify({ ok: false, error: "no answer in this scenario" })) : JSON.stringify(JSON.stringify(a))

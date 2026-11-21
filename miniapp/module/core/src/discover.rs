@@ -35,6 +35,8 @@ pub const MAX_BLOCKS_CAP: u64 = 10_000;
 pub const RANGE: u64 = 100;
 /// Between two RPC calls of a scan.
 pub const GAP: Duration = Duration::from_millis(1000);
+/// Schedules one call imports (each reads the account once more); the rest wait for the next call.
+pub const IMPORTS_PER_CALL: usize = 5;
 /// Wall time one call may spend reading before it answers (the app calls again).
 pub const BUDGET: Duration = Duration::from_secs(10);
 

@@ -27,6 +27,11 @@ fn main() {
     });
     std::fs::write(&file, network.to_string()).unwrap();
     let mut module = vesting_module_core::Module::new(&dir);
+    // VEST_GUARD=1: through the relay the shipped module puts in front of a public RPC.
+    if std::env::var("VEST_GUARD").is_ok() {
+        module.guard_local_rpc(vesting_sdk::rpc_guard::Policy::default());
+    }
+    let most: usize = std::env::var("VEST_CALLS").ok().and_then(|n| n.parse().ok()).unwrap_or(200);
     let cfg: Value = serde_json::from_str(&module.configure(
         &json!({ "signer": "names", "network_file": file.display().to_string() }).to_string(),
     ))
@@ -46,7 +51,7 @@ fn main() {
             answer["found"].as_array().map_or(0, |f| f.len()), answer["incoming"], answer["known"],
             answer["pending"], answer["done"], answer["error"].as_str().unwrap_or("")
         );
-        if answer["done"] == true || calls > 200 {
+        if answer["done"] == true || calls >= most {
             break;
         }
     }
