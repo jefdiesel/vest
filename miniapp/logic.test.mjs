@@ -386,3 +386,13 @@ check("zoneProblem: no zone or no chain to compare", [
   const src = readFileSync(new URL("./qml/logic.mjs", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
   check("logic.mjs has no BigInt literals (QML can't parse them)", /\b\d+n\b/.test(src), false);
 }
+
+// QML's engine reserves the old Java-style words: a variable named like these stops the whole file loading in Basecamp.
+{
+  const reservedNames = ["short", "int", "long", "byte", "char", "float", "double", "boolean", "native", "transient", "volatile", "synchronized", "throws", "goto", "abstract", "final"];
+  for (const f of ["./qml/Main.qml", "./qml/logic.mjs", "./qml/NamesWalletSDK.mjs"]) {
+    const src = readFileSync(new URL(f, import.meta.url), "utf8").replace(/\/\/.*$/gm, "").replace(/"(\\.|[^"\\])*"/g, '""');
+    const bad = reservedNames.filter(w => new RegExp("\\b(var|let|const)\\s+" + w + "\\b").test(src));
+    check("no reserved word used as a name in " + f, bad, []);
+  }
+}

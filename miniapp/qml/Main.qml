@@ -423,8 +423,8 @@ Item {
         if (!v.ok) { say(v.errors[0], true); return }
         // Enough LEZ in the paying account? Say so here, before Names Wallet is asked.
         var payer = findById(publicAccounts, cCreator)
-        var short = Logic.shortOfFunds(payer ? payer.balance : null, p.amount, p.tranches)
-        if (short !== "") { say(short, true); return }
+        var notEnough = Logic.shortOfFunds(payer ? payer.balance : null, p.amount, p.tranches)
+        if (notEnough !== "") { say(notEnough, true); return }
         var looked = found !== "" ? root.payee.resolved : []
         var typed = beneficiaryField.text.trim()
         namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
