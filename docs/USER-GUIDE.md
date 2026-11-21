@@ -4,7 +4,9 @@ Vest pays tokens out over time. Someone **paying out** locks tokens in a schedul
 person; the person **receiving** claims them as they unlock. LEZ is the coin; Logos is the
 network. Vest runs in Logos Basecamp and signs through your **Names Wallet**: you choose which
 accounts Vest may see, and you approve every payment and claim in the Names app. Vest never sees
-a key.
+a key and has no signer of its own. (Another wallet that implements the Names Wallet SDK works
+the same way; with more than one installed, Vest asks once which to use, and Settings can change
+it.)
 
 This guide follows the app. The same steps are on Vest's first screen, and one click away under
 **Steps**, top right.
@@ -20,7 +22,7 @@ This guide follows the app. The same steps are on Vest's first screen, and one c
    approve, and Names
    brings you back to Vest. You can take this back in Names at any time.
 
-Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates are written
+Amounts are in LEZ. Dates are written
 `yyyy-mm-dd` and mean midnight UTC.
 
 ---
@@ -44,10 +46,8 @@ Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates
    approve the claim in Names Wallet." until you do, then the transaction, and what happens next.
    You can withdraw the request while it waits.
 
-**Private claims.** A private claim pays a private account of yours: the amount is public, but
-where the tokens go after that stays hidden. It is proven on your computer and takes a few
-minutes. Names Wallet can't sign a private claim for Vest yet (see *What Names Wallet can't do yet*
-below); with a wallet folder (Settings, Advanced) Vest offers it.
+**Private claims.** Claims go to your public account for now: Names Wallet can't sign a private
+claim for Vest yet (see *What Names Wallet can't do yet* below), so Vest doesn't offer one.
 
 **They can hand it to someone else.** If the schedule was made transferable, you can hand what is
 still to unlock to another account; Names Wallet 0.18 or later approves it for a LEZ schedule.
@@ -70,12 +70,13 @@ still to unlock to another account; Names Wallet 0.18 or later approves it for a
      unlocked comes back to you; what has stays theirs. Making it permanent can't be undone.
    - **They can hand it to someone else**: the person receiving can pass the rest of the schedule
      to another account. This is fixed when you create it.
-   - **More options**: another token; and someone else who may cancel, or who says when a
-     milestone is reached (a board, a lawyer). By default that is you.
+   - **More options**: someone else who may cancel, or who says when a milestone is reached (a
+     board, a lawyer). By default that is you.
    - **Who receives it**: their address or LNS name. Vest looks the name up as you type and
      shows who it pays (`Pays alice · 2BhK…fGrD`), or says plainly that no one holds that name.
-     Create won't go ahead with a name it can't find.
-   - **Several people, one transaction**: one row per person, up to 140.
+     With Names Wallet connected, the name is looked up through Names, and the schedule is made
+     for the account Names found. Create won't go ahead with a name it can't find.
+   - One person per schedule, in LEZ: Vest says so under the form (see below).
 3. **Approve it in Names Wallet**
 4. **Share the schedule's address or your LNS name with them**, so they can add it in Vest.
 5. **Later:** on **Pay out**, under *Schedules you manage*: cancel a schedule, make it permanent,
@@ -87,26 +88,28 @@ still to unlock to another account; Names Wallet 0.18 or later approves it for a
 With Names Wallet 0.18 or later, Names Wallet approves every step of a **LEZ schedule**: creating,
 public claims, cancelling, making permanent, unlocking a milestone and transferring. (Those steps
 read the network's clock, another program's account, which Names Wallet's program calls carry
-since 0.18; Names says "Reads the network clock" when it asks you.) Three things still need a
-wallet folder:
+since 0.18; Names says "Reads the network clock" when it asks you.) Three things it can't
+approve yet, so Vest doesn't offer them:
 
-- **Claiming a token schedule**: the claim moves the token through the token program's accounts,
-  which `propose_call` can't name.
+- **Token schedules** (paying out, or claiming, a token other than LEZ): the claim moves the
+  token through the token program's accounts, which `propose_call` can't name.
 - **A private claim**: it needs your public account to sign while a private account of yours
   receives, in one transaction; Names Wallet's private calls sign nothing public.
 - **Several schedules in one transaction (batch create)**: Names Wallet 0.18 does not approve
-  batch creates yet.
+  batch creates yet. Make one schedule per person.
 
-For those, Vest can sign itself with a **wallet folder** (Settings, Advanced): a LEZ wallet made
-with the LEZ wallet's command line (`wallet_config.json` and `storage.json`). Everything above
-then works from Vest, and the same steps apply without the Names approvals.
+The command line (`vesting`, below) still signs with its own wallet and does all three.
 
 ## When something goes wrong
 
 Vest says what happened in one line under the page, and what to do. A few you may see:
 
+- **"No wallet installed: install Names from Basecamp's app list."**: install Names, then press
+  *Check again*.
 - **"Names Wallet isn't installed, or isn't open. Install Names from Basecamp's app list, open it
   once, then come back here."**: press *Check again* once Names is open.
+- **"Which wallet should Vest use?"**: more than one wallet is installed; choose one. Vest
+  remembers it (Settings, *Use another wallet*, to change it).
 - **"Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names:
   Settings, Network), then come back."**: change the network in Names.
 - **"Names Wallet is busy."**: Vest waits and tries again a few times; nothing was sent twice.

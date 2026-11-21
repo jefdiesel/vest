@@ -246,12 +246,14 @@ Details in [`docs/EVENTS.md`](docs/EVENTS.md).
 ## Mini-app and viewer
 
 - `miniapp/`: two Basecamp packages, the `vesting` core module and the `vesting_ui` app. Vest
-  signs through the person's **Names Wallet** (its Provider SDK): it opens Names with each request
-  and Names brings the person back once they answer. The first screen asks what you came to do
-  (claim, or pay out) and walks through five steps; the payout box looks LNS names up as you
-  type. With Names Wallet 0.18 or later it also approves creating, cancelling, making permanent,
-  unlocking a milestone and transferring a LEZ schedule. A wallet folder (Settings, Advanced) is
-  still needed for batch creates, token schedules and private claims. Build and module calls:
+  signs only through the person's wallet, with the **Names Wallet SDK** (Names, or any wallet
+  that implements the SDK): it opens the wallet with each request and the wallet brings the
+  person back once they answer. The first screen asks what you came to do (claim, or pay out)
+  and walks through five steps; the payout box looks LNS names up as you type. With Names Wallet
+  0.18 or later it also approves creating, cancelling, making permanent, unlocking a milestone
+  and transferring a LEZ schedule. Batch creates, token schedules and private claims aren't
+  offered in the app until the wallet can approve them (the CLI does them with its own wallet).
+  Build and module calls:
   `miniapp/README.md`; for people:
   `docs/USER-GUIDE.md`; install and click-through: `docs/BASECAMP-TEST.md`.
 - `web/viewer/`: `cd web/viewer && python3 -m http.server 8099`, then open the page and give a

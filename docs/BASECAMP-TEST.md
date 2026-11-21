@@ -1,12 +1,14 @@
 # Vest in Basecamp: install and click-through test
 
 What this checks: the two Basecamp packages load, Vest connects to Names Wallet and comes back,
-a public LEZ claim goes through Names Wallet, the payout box looks names up, and (with a wallet
-folder) creating, cancelling, unlocking a milestone and a batch. Every write is a real transaction
+a public LEZ claim goes through Names Wallet, the payout box looks names up through Names, and
+creating, cancelling and unlocking a milestone through Names Wallet (0.18 or later). Vest has no
+signer of its own in Basecamp. Every write is a real transaction
 on the public LEZ rc3 demo chain (`https://lez.nameswallet.app/`), with small amounts. Run it on a
 test Basecamp (0.3.x) with nothing else at stake.
 
-A recorded run (wallet-folder signing, 2026-11-20): `docs/live/basecamp-clickthrough-20261120.md`.
+A recorded run of an older Vest (wallet-folder signing, removed since, 2026-11-20):
+`docs/live/basecamp-clickthrough-20261120.md`.
 
 ## 0. What you need
 
@@ -15,17 +17,10 @@ A recorded run (wallet-folder signing, 2026-11-20): `docs/live/basecamp-clickthr
   sha256 against the build's `SHA256SUMS`.
 - **Names** installed, opened once, on the **bridge test network** (in Names: Settings, Network),
   with a public account holding a little LEZ (about 0.01 LEZ pays several fees).
-- For **paying out** until Names Wallet can approve it: a LEZ rc3 wallet folder
-  (`wallet_config.json` + `storage.json`) with a funded public account, made with the `vesting`
-  CLI built `--features lez`:
-
-  ```sh
-  V="vesting --network https://lez.nameswallet.app/ --wallet <wallet folder>"
-  $V wallet account new public      # prints Public/<base58>
-  ```
-
-- A schedule for your Names account to claim: make one with the wallet folder (step 5) or the CLI,
-  with your Names account as the beneficiary and a start date in the past.
+- **Names 0.18 or later** for paying out (it approves calls that read the network clock).
+- A schedule for your Names account to claim: make one in step 5, or with the `vesting` CLI
+  (built `--features lez`, its own wallet folder), with your Names account as the beneficiary and
+  a start date in the past.
 
 Amounts in the app are in LEZ; dates are `yyyy-mm-dd` (midnight UTC).
 
@@ -70,25 +65,25 @@ Amounts in the app are in LEZ; dates are `yyyy-mm-dd` (midnight UTC).
 - a name nobody registered: "No one holds the LNS name …" (red), and Create stops on it;
 - an address: `Pays the address …`.
 
-Typing in the amount, milestone and batch boxes goes in whole (each keystroke lands where it was
-typed).
+Typing in the amount and milestone boxes goes in whole (each keystroke lands where it was typed).
 
-## 5. Paying out (wallet folder, for now)
+## 5. Paying out (through Names Wallet)
 
-With Names Wallet, **Create** is off and says why above the button. To pay out today: Settings,
-**Advanced: a wallet folder instead of Names Wallet**, give the folder (and its password if it has
-one), **Sign with this wallet folder**.
+With Names older than 0.18, **Create** is off and says why above the button. Each step below
+opens Names with the call; choose the account it names and approve; Names brings you back.
 
 1. **Pay out**, **Evenly over time**, start yesterday, fully unlocked in two days, *Who receives it*
-   your Names account, **How much** `0.001`, **Create schedule**. Expected: "Creating…", then
-   "Created schedule N" and what to share with them.
+   your Names account, **How much** `0.001`, **Create schedule**. Expected: "In Names Wallet,
+   choose … and approve.", then "Created schedule N · … · tx …" and what to share with them.
 2. **Milestones**: two milestones `0.0003` and `0.0007`, **Create schedule**. Under *Schedules you
    manage*: **Unlock milestone 1**; it disappears and that part becomes claimable.
 3. **Cancel schedule** on the milestone schedule: the confirmation says it can't be undone;
-   confirm. Expected: "Cancelled schedule N. … went back to the creator."
-4. **Several people, one transaction**: two rows, **Create 2 schedules**: one transaction.
-
-Switch back with Settings, **Use Names Wallet instead**.
+   confirm and approve in Names. Expected: "Cancelled schedule N. … went back to the creator."
+4. The form offers no batch, no other token and no private claim, and says so under it ("One
+   person per schedule, in LEZ…").
+5. Settings: **Signing** says Vest signs through Names Wallet and names the wallet in use; there
+   is no wallet folder anywhere. A Vest that had a wallet folder saved before switches to Names
+   Wallet by itself.
 
 ## 6. What to send back
 

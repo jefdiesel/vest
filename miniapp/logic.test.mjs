@@ -3,7 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as L from "./qml/logic.mjs";
+import * as SDK from "./qml/NamesWalletSDK.mjs";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const check = (label, got, want) => {
   test(label, () => assert.deepStrictEqual(got, want));
@@ -85,23 +87,6 @@ check("validateCreate: milestone needs tranches", [L.validateCreate(valid("miles
 check("validateCreate: bad authority", L.validateCreate(valid("linear", { cancelAuthority: "b@d" })).ok, false);
 
 // ── Pre-claim confirmation ────────────────────────────────────────────────────────────
-const SIM = { fee_simulated: true, estimated_fee_display: "0.000012 LEZ", fee_available_display: "0.00001 LEZ" };
-check("feeCheck: covered", [L.feeCheck({ ...SIM, fee_covered: true, fee_payer: "caller" }).ok, /can pay the estimated fee of 0.000012 LEZ/.test(L.feeCheck({ ...SIM, fee_covered: true }).message)], [true, true]);
-const shortFee = L.feeCheck({ ...SIM, fee_covered: false, fee_payer: "claim_target" });
-check("feeCheck: not covered is clear", [shortFee.ok, /private account/.test(shortFee.message), /can't pay/.test(shortFee.message), /0.00001 LEZ/.test(shortFee.message)], [false, true, true, true]);
-check("feeCheck: a reverting claim is refused", L.feeCheck({ ...SIM, fee_covered: true, revert_reason: "x" }).ok, false);
-check("feeCheck: no fee on a local ledger", [L.feeCheck({ fee_simulated: false }).ok, /No network fee/.test(L.feeCheck({}).message)], [true, true]);
-const pd = L.privacyDisclosure();
-check("privacy disclosure: visible", [pd.visible.length, /claim amount/.test(pd.text), /beneficiary address/.test(pd.text), /vesting schedule address/.test(pd.text)], [3, true, true, true]);
-check("privacy disclosure: not traceable", [/which private account/.test(pd.text), /any later movement/.test(pd.text)], [true, true]);
-
-// ── Plain result lines ───────────────────────────────────────────────────────────────
-check("claimLine: private", L.claimLine("300000", "LEZ", "Private/" + ID, "tx1", true), "Claimed 300,000 LEZ to Private/" + ID + " (private) · tx1.");
-check("claimLine: public", /\(public\)/.test(L.claimLine("1", "LEZ", "Public/" + ID, "", false)), true);
-check("claimLineDisplay uses the module's string", L.claimLineDisplay("0.094138 LEZ", "Private/" + ID, "tx9", true), "Claimed 0.094138 LEZ to Private/" + ID + " (private) · tx9.");
-check("claimLineDisplay with the module's tx", L.claimLineDisplay("1 LEZ", "x", { hash: "c5d782913d8819b009c8d15815697b20", block: 39066 }, false), "Claimed 1 LEZ to x (public) · tx c5d782…7b20 in block 39066.");
-check("result lines", [L.createLine("SCHED-1234567890"), L.cancelLine("SCHED-1234567890"), L.signalLine(2, "SCHED-1234567890")], ["Created schedule SCHED-…7890.", "Cancelled schedule SCHED-…7890.", "Signalled milestone 3 on SCHED-…7890."]);
-check("nothingClaimable", /in 3 days/.test(L.nothingClaimable(CLIFF, NOW)), true);
 
 // ── LNS names: the module's name book is {hex account: name} ─────────────────────
 const NAMES = { [HEXID]: "alice" };
@@ -133,15 +118,6 @@ check("toCreateRow", made, { creator: HEXID, beneficiary: "alice", token: "LEZ",
 check("toCreateRow: milestone total is the tranche sum", L.toCreateRow({ kind: "milestone", beneficiary: "a", token: "LEZ", tranches: ["40", "60"] }, HEXID).total, "100");
 
 // ── Batch creation ──────────────────────────────────────────────────────────────────
-check("parseTrancheText", [L.parseTrancheText("100000, 200000;300000"), L.parseTrancheText(""), L.parseTrancheText("1,,2")], [["100000", "200000", "300000"], [], ["1", "2"]]);
-const batchShared = { kind: "linear", token: "LEZ", start: NOW, cliff: 0, end: NOW + 365 * DAY, cancelable: true, transferable: false };
-const batchValid = { ...batchShared, rows: [{ beneficiary: "Public/" + ID, amount: "100000" }, { beneficiary: "Private/" + ID, amount: "200000" }] };
-check("validateBatch: valid", L.validateBatch(batchValid).ok, true);
-check("validateBatch: bad row is named", (() => { const v = L.validateBatch({ ...batchValid, rows: [{ beneficiary: "Public/" + ID, amount: "100000" }, { beneficiary: "bad", amount: "0" }] }); return [v.ok, /Recipient 2/.test(v.errors.join(" "))]; })(), [false, true]);
-check("validateBatch: no rows", L.validateBatch({ ...batchValid, rows: [] }).ok, false);
-check("validateBatch: milestone tranches", L.validateBatch({ ...batchShared, kind: "milestone", rows: [{ beneficiary: "Public/" + ID, amount: "100000", tranches: "40000,60000" }] }).ok, true);
-check("validateBatch: milestone needs tranches", L.validateBatch({ ...batchShared, kind: "milestone", rows: [{ beneficiary: "Public/" + ID, amount: "100000", tranches: "" }] }).ok, false);
-check("batchLine", [L.batchLine(1), L.batchLine(3)], ["Created 1 schedule.", "Created 3 schedules."]);
 
 // ── Every module call passes text: Basecamp refuses a QML number for an integer parameter ──
 {
@@ -155,12 +131,6 @@ check("batchLine", [L.batchLine(1), L.batchLine(3)], ["Created 1 schedule.", "Cr
 // ── Plain words on the screen ────────────────────────────────────────────────────
 check("toBase: LEZ to base units, exact", [L.toBase("0.5"), L.toBase("1,000"), L.toBase(".000000001"), L.toBase("2"), L.toBase("1.0000000001"), L.toBase("x"), L.toBase(""), L.toBase("0")], ["500000000", "1000000000000", "1", "2000000000", "", "", "", ""]);
 check("toBase: token decimals", L.toBase("1.5", 2), "150");
-const NOWALLET = { ok: true, connected: false, status: "not opened yet", settings: { wallet_dir: "" } };
-check("first run: no wallet chosen is not an error", [L.firstRun(NOWALLET), L.connectProblem(NOWALLET)], [true, ""]);
-check("a saved wallet not opened yet is not an error either", L.connectProblem({ connected: false, status: "not opened yet", settings: { wallet_dir: "/w" } }), "");
-check("a wrong folder says so plainly", L.connectProblem({ connected: false, status: "no wallet at /w", settings: { wallet_dir: "/w" } }), "No wallet found in that folder. Choose the folder that holds wallet_config.json and storage.json.");
-check("an encrypted wallet, another chain", [/password/.test(L.connectProblem({ connected: false, status: "the wallet is encrypted: give its password", settings: { wallet_dir: "/w" } })), /different network/.test(L.connectProblem({ connected: false, status: "https://x serves chain ab, not cd", settings: { wallet_dir: "/w" } }))], [true, true]);
-check("connected: no problem, no first run", [L.connectProblem({ connected: true }), L.firstRun({ connected: true, settings: {} })], ["", false]);
 check("isFinished", [L.isFinished({ total: "10", claimed: "10", claimable: "0" }), L.isFinished({ total: "10", claimed: "3", claimable: "1" }), L.isFinished({ total: "10", claimed: "3", claimable: "0", cancelled: true })], [true, false, true]);
 // A cancelled schedule: the program keeps what had vested by the cancel claimable (core
 // CancelRecord.vested_at_cancel); nothing is locked and nothing more vests.
@@ -184,12 +154,18 @@ check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nam
 }
 
 // ── Names Wallet ───────────────────────────────────────────────────────────────────
-check("namesReply: value, busy, refusal, missing", [
-  L.namesReply(JSON.stringify({ success: true, value: { connected: true }, error: null })).value.connected,
-  L.namesReply(JSON.stringify({ success: false, busy: true, value: null, error: "The wallet is busy; still working." })).busy,
-  L.namesReply({ success: false, value: null, error: "ask for access first" }).error,
-  L.namesReply("Module not connected: names").missing,
-  L.namesReply("").busy], [true, true, "ask for access first", true, true]);
+// The Names Wallet SDK, copied unchanged from the Names repository (sdk/qml/): its own tests are
+// there (sdk/NamesWalletSDK.test.mjs). A new copy changes these hashes on purpose.
+const SDK_FILES = { "NamesWalletSDK.mjs": "69be803a6c8db2ee988183564a20ecf9950920f2b235b6f52ec8201dc59a40ef", "NamesWallet.qml": "6161ab99dca96e6b50290ff84e9fa327c5a26b6d5c03c665c419d8382ccafc65" };
+check("the Names Wallet SDK is version 1.0.0, unchanged", [SDK.VERSION, ...Object.keys(SDK_FILES).map(f => createHash("sha256").update(readFileSync(new URL("./qml/" + f, import.meta.url))).digest("hex"))],
+  ["1.0.0", ...Object.values(SDK_FILES)]);
+check("names replies through the SDK: value, busy, refusal, missing, unclear", [
+  SDK.reply(JSON.stringify({ success: true, value: { connected: true }, error: null })).value.connected,
+  SDK.reply(JSON.stringify({ success: false, busy: true, value: null, error: "The wallet is busy; still working." })).busy,
+  SDK.reply({ success: false, value: null, error: "ask for access first" }).error,
+  SDK.reply("Module not connected: names").missing,
+  SDK.reply("").unclear], [true, true, "ask for access first", true, true]);
+check("Vest's Names words are the SDK's shared ones", L.requestLine === SDK.requestLine, true);
 check("zone check", [L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7"), /Switch Names Wallet to the bridge test network/.test(L.zoneProblem({ zone: { channel: "01" } }, "2da7")), L.zoneProblem({}, "2da7")], ["", true, ""]);
 check("request lines", [L.requestLine({ state: "pending" }, "the claim"), L.requestLine({ state: "rejected" }, "the claim"), L.requestLine({ state: "done" }), L.requestOpen({ state: "running" }), L.requestOpen({ state: "done" })],
   ["Waiting for you to approve the claim in Names Wallet.", "You declined the claim in Names Wallet. Nothing was sent.", "", true, false]);
@@ -205,8 +181,19 @@ check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error:
 check("payee: a name with no account says so", L.payeeLine("jefdiesel", { ok: false, error: "LNS name 'jefdiesel' publishes no account to pay" }).text.startsWith("Can't pay jefdiesel by name yet"), true);
 check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).text.startsWith("Pays the address"), true);
 check("names write words", [L.writeWhat("create"), L.writeWhat("cancel:3"), L.writeWhat("signal:3:1"), L.writeWhat("x")], ["the new schedule", "the cancel", "the milestone", "the request"]);
-check("names: an unreadable answer is retried like busy", L.namesReply("<html>").busy, true);
 check("hex accounts show as base58", [L.base58Of("11".repeat(32)), L.base58Of("00".repeat(31) + "01"), L.base58Of("Public/x")], ["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", "1".repeat(31) + "2", "Public/x"]);
+check("names: an unreadable answer is unclear (a read is asked again; a proposal never)", SDK.reply("<html>").unclear, true);
+const FOUND = { ok: true, name: "alice", display: "alice.lez", account: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z", forwardedFrom: null, lapsed: false };
+check("payee through Names: a name shows who and the address", [L.payeeFromNames("alice", FOUND).ok, L.payeeFromNames("alice", FOUND).text], [true, "Pays alice · FLBC4V…BE2Z"]);
+check("payee through Names: a forward says where it points", L.payeeFromNames("old", { ...FOUND, forwardedFrom: "old" }).text, "Pays old (it points to alice) · FLBC4V…BE2Z");
+check("payee through Names: unknown, no account, can't check", [
+  L.payeeFromNames("nobdy", { ok: false, code: "not_registered", name: "nobdy" }).text.startsWith("No one holds the LNS name nobdy"),
+  L.payeeFromNames("empty", { ok: false, code: "no_account", name: "empty" }).text.startsWith("Can't pay empty by name"),
+  L.payeeFromNames("alice", { ok: false, code: "unavailable", error: "Names Wallet is busy." }).retry], [true, true, true]);
+check("the schedule is made for the account Names found, only for what is still typed", [
+  L.payeeAccount(L.payeeFromNames("alice", FOUND), "alice"), L.payeeAccount(L.payeeFromNames("alice", FOUND), "alicia"),
+  L.payeeAccount({ ok: true, base58: FOUND.account, text: "x" }, "alice"), L.payeeAccount(null, "alice")],
+  ["Public/" + FOUND.account, "", "", ""]);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);
@@ -215,13 +202,16 @@ check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.ne
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has vested to you\./.test(qml)], [false, false, true]);
-  check("names calls pass text only", [...qml.matchAll(/namesCall\("(\w+)",\s*(\[[^\]]*\])/g)].filter(m => /Number\(/.test(m[2])).map(m => m[1]), []);
-  check("first run asks to connect Names Wallet, not for a wallet folder", [/What do you want to do\?/.test(qml) && /label: "Connect"/.test(qml), /Advanced: a wallet folder/.test(qml)], [true, true]);
+  check("the wallet only through the SDK, never named: no module calls to it, no \"names\" in Vest", [/callModuleAsync\("names"/.test(qml), /"names"/.test(qml.replace('signer: "names"', "")), /NamesWallet \{ id: wallet; app: "vesting_ui"/.test(qml), /wallet\.(connect|proposeCall|withdraw|resolve|check|disconnect|chooseWallet)\(/.test(qml)], [false, false, true, true]);
+  check("names calls pass text only", [...qml.matchAll(/wallet\.\w+\(([^)]*)\)/g)].filter(m => /Number\(/.test(m[1])).map(m => m[0]), []);
+  check("first run asks to connect Names Wallet; no wallet folder anywhere", [/What do you want to do\?/.test(qml) && /label: "Connect"/.test(qml), /wallet folder|wallet_dir|password|passwordField/i.test(qml)], [true, false]);
+  check("Vest signs only through the wallet: no module call that signs itself", ["claim_public", "claim_private", "\"create\"", "create_batch", "\"cancel\"", "make_irrevocable", "signal_milestone", "transfer_beneficiary", "pre_claim_summary"].filter(m => qml.includes('call(' + (m.startsWith('"') ? m : '"' + m + '"'))), []);
+  check("several wallets: Vest offers the choice", [/root\.namesState === "choose"/.test(qml), /wallet\.wallets/.test(qml)], [true, true]);
 }
 
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;
-for (const file of ["./qml/Main.qml", "./qml/logic.mjs", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {
+for (const file of ["./qml/Main.qml", "./qml/logic.mjs", "./qml/NamesWalletSDK.mjs", "./qml/NamesWallet.qml", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
   const dotted = source
     .map((line, i) => [i + 1, line.replace(/"(\\.|[^"\\])*"|'(\\.|[^'\\])*'|\/\/.*$/g, '""')])
@@ -252,10 +242,6 @@ check("isNative: LEZ, zero account, a token id", [
   L.isNative(""), L.isNative(null), L.isNative(" lez "), L.isNative("0".repeat(64)),
   L.isNative(ID), L.isNative("LEZ ")
 ], [true, true, true, true, false, true]);
-check("txText: nothing, a hash, a block", [
-  L.txText(null), L.txText({}), L.txText({ hash: "c5d782913d8819b009c8d15815697b20" }),
-  L.txText({ hash: "c5d782913d8819b009c8d15815697b20", block: 39066 })
-], ["", "", "tx c5d782…7b20", "tx c5d782…7b20 in block 39066"]);
 
 // isFullyClaimed and isClosed: empty, zero, partial, cancelled, fully claimed, u128.
 check("isFullyClaimed: empty, zero, partial, exact, u128", [
@@ -300,17 +286,8 @@ check("nextUnlock: fewer signals than tranches", [
 ], ["Next unlock: tranche 1 — signalled by the creator.", "Next unlock: tranche 2 — signalled by the creator."]);
 
 // Fee coverage and payer names not reached by the existing feeCheck assertions.
-check("feeCheck: unknown coverage, private payer", [
-  L.feeCheck({ fee_simulated: true, estimated_fee_display: "1 LEZ" }).message,
-  L.feeCheck({ fee_simulated: true, fee_covered: true, fee_payer: "claim_target", estimated_fee_display: "2 LEZ" }).message
-], ["Estimated fee 1 LEZ.", "The private account (paid from what the claim brings it) can pay the estimated fee of 2 LEZ."]);
 
 // connectProblem: an unreachable RPC, an unknown reason, and a wallet not opened yet.
-check("connectProblem: unreachable, unknown, quiet", [
-  /Can't reach the network/.test(L.connectProblem({ connected: false, status: "getChannelId timed out", settings: { wallet_dir: "/w" } })),
-  L.connectProblem({ connected: false, status: "Not connected: odd thing", settings: { wallet_dir: "/w" } }),
-  L.connectProblem({ connected: false, status: "", settings: { wallet_dir: "/w" } })
-], [true, "Couldn't connect: odd thing.", ""]);
 
 // clean and the payee/reply fallbacks that earlier checks did not reach.
 check("clean: length, null, control and bidi characters", [
@@ -324,12 +301,6 @@ check("payeeLine: an unrecognised refusal, and no reason at all", [
   L.payeeLine("bob", { ok: false, error: "nope" }).text,
   L.payeeLine("bob", { ok: false }).text
 ], ["That isn't an address or an LNS name Vest can find: nope", "That isn't an address or an LNS name Vest can find."]);
-check("namesReply: twice encoded, null, an empty refusal, a bad answer", [
-  L.namesReply(JSON.stringify(JSON.stringify({ success: true, value: 7 }))).value,
-  L.namesReply(null).busy,
-  L.namesReply({ success: false, error: "" }).error,
-  /isn't answering normally/.test(L.namesReply("<html>").error)
-], [7, true, "Names Wallet said no.", true]);
 
 // requestLine: the states not in the earlier check.
 check("requestLine: running, expired, cancelled, failed, nothing", [
@@ -403,8 +374,4 @@ check("zoneProblem: no zone or no chain to compare", [
   L.zoneProblem(null, "2da7"), L.zoneProblem({ zone: { channel: "2da7" } }, ""),
   L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7")
 ], ["", "", ""]);
-check("firstRun and the small result lines at zero", [
-  L.firstRun(null), L.firstRun({ connected: false, settings: {} }),
-  L.batchLine(0), L.signalLine(0, "X")
-], [false, true, "Created 0 schedules.", "Signalled milestone 1 on X."]);
 
