@@ -106,7 +106,7 @@ check("nothingClaimable", /in 3 days/.test(L.nothingClaimable(CLIFF, NOW)), true
 // ── LNS names: the module's name book is {hex account: name} ─────────────────────
 const NAMES = { [HEXID]: "alice" };
 check("nameOf", [L.nameOf(HEXID, NAMES), L.nameOf(HEXID.toUpperCase(), NAMES), L.nameOf("0b".repeat(32), NAMES)], ["alice", "alice", ""]);
-check("labelled", [L.labelled(HEXID, NAMES), L.labelled("0b".repeat(32), {})], ["alice · " + L.short(HEXID), L.short("0b".repeat(32))]);
+check("labelled", [L.labelled(HEXID, NAMES), L.labelled("0b".repeat(32), {})], ["alice · " + L.short(L.base58Of(HEXID)), L.short(L.base58Of("0b".repeat(32)))]);
 check("accountInput passes names and accounts through", [L.accountInput("  alice ").account, L.accountInput("Private/" + ID).ok], ["alice", true]);
 check("accountInput refuses junk", L.accountInput("not a name!").ok, false);
 check("resolvedLines", L.resolvedLines([{ name: "alice", base58: ID }]), ["alice resolves to " + ID + "."]);
@@ -206,6 +206,7 @@ check("payee: a name with no account says so", L.payeeLine("jefdiesel", { ok: fa
 check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).text.startsWith("Pays the address"), true);
 check("names write words", [L.writeWhat("create"), L.writeWhat("cancel:3"), L.writeWhat("signal:3:1"), L.writeWhat("x")], ["the new schedule", "the cancel", "the milestone", "the request"]);
 check("names: an unreadable answer is retried like busy", L.namesReply("<html>").busy, true);
+check("hex accounts show as base58", [L.base58Of("11".repeat(32)), L.base58Of("00".repeat(31) + "01"), L.base58Of("Public/x")], ["29d2S7vB453rNYFdR5Ycwt7y9haRT5fwVwL9zTmBhfV2", "1".repeat(31) + "2", "Public/x"]);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);

@@ -361,7 +361,20 @@ export function nameOf(account, names) {
 /// "alice · 0a1b2c…7f8e" for a known name, else just the short account.
 export function labelled(account, names) {
     var name = nameOf(account, names)
-    return name ? name + " · " + short(account) : short(account)
+    var shown = short(base58Of(account))
+    return name ? name + " · " + shown : shown
+}
+
+var B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+/// A 64-hex account as base58 (how Names and the network show accounts); anything else as is.
+export function base58Of(account) {
+    var s = String(account == null ? "" : account)
+    if (!/^[0-9a-fA-F]{64}$/.test(s)) return s
+    var n = BigInt("0x" + s), out = ""
+    while (n > 0n) { out = B58[Number(n % 58n)] + out; n = n / 58n }
+    for (var i = 0; i < 64 && s.substr(i, 2) === "00"; i += 2) out = "1" + out
+    return out
 }
 
 /// What the user typed, checked for shape only: {ok, account, error}. The module resolves
