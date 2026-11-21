@@ -3,7 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as L from "./qml/logic.mjs";
+import * as SDK from "./qml/NamesWalletSDK.mjs";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const check = (label, got, want) => {
   test(label, () => assert.deepStrictEqual(got, want));
@@ -184,12 +186,18 @@ check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nam
 }
 
 // ── Names Wallet ───────────────────────────────────────────────────────────────────
-check("namesReply: value, busy, refusal, missing", [
-  L.namesReply(JSON.stringify({ success: true, value: { connected: true }, error: null })).value.connected,
-  L.namesReply(JSON.stringify({ success: false, busy: true, value: null, error: "The wallet is busy; still working." })).busy,
-  L.namesReply({ success: false, value: null, error: "ask for access first" }).error,
-  L.namesReply("Module not connected: names").missing,
-  L.namesReply("").busy], [true, true, "ask for access first", true, true]);
+// The Names Wallet SDK, copied unchanged from the Names repository (sdk/qml/): its own tests are
+// there (sdk/NamesWalletSDK.test.mjs). A new copy changes these hashes on purpose.
+const SDK_FILES = { "NamesWalletSDK.mjs": "24db90fce5dc41d99b0b359fc2a774889c78694c5f3c93eec8d68d672d6de55b", "NamesWallet.qml": "d798984a1e7eb6b81193adf08a12b91dc6c0134240e9fc85ac7f1165ffab7025" };
+check("the Names Wallet SDK is version 1.0.0, unchanged", [SDK.VERSION, ...Object.keys(SDK_FILES).map(f => createHash("sha256").update(readFileSync(new URL("./qml/" + f, import.meta.url))).digest("hex"))],
+  ["1.0.0", ...Object.values(SDK_FILES)]);
+check("names replies through the SDK: value, busy, refusal, missing, unclear", [
+  SDK.reply(JSON.stringify({ success: true, value: { connected: true }, error: null })).value.connected,
+  SDK.reply(JSON.stringify({ success: false, busy: true, value: null, error: "The wallet is busy; still working." })).busy,
+  SDK.reply({ success: false, value: null, error: "ask for access first" }).error,
+  SDK.reply("Module not connected: names").missing,
+  SDK.reply("").unclear], [true, true, "ask for access first", true, true]);
+check("Vest's Names words are the SDK's shared ones", [L.NAMES_MISSING === SDK.WORDS.missing, L.requestLine === SDK.requestLine], [true, true]);
 check("zone check", [L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7"), /Switch Names Wallet to the bridge test network/.test(L.zoneProblem({ zone: { channel: "01" } }, "2da7")), L.zoneProblem({}, "2da7")], ["", true, ""]);
 check("request lines", [L.requestLine({ state: "pending" }, "the claim"), L.requestLine({ state: "rejected" }, "the claim"), L.requestLine({ state: "done" }), L.requestOpen({ state: "running" }), L.requestOpen({ state: "done" })],
   ["Waiting for you to approve the claim in Names Wallet.", "You declined the claim in Names Wallet. Nothing was sent.", "", true, false]);
@@ -205,7 +213,18 @@ check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error:
 check("payee: a name with no account says so", L.payeeLine("jefdiesel", { ok: false, error: "LNS name 'jefdiesel' publishes no account to pay" }).text.startsWith("Can't pay jefdiesel by name yet"), true);
 check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).text.startsWith("Pays the address"), true);
 check("names write words", [L.writeWhat("create"), L.writeWhat("cancel:3"), L.writeWhat("signal:3:1"), L.writeWhat("x")], ["the new schedule", "the cancel", "the milestone", "the request"]);
-check("names: an unreadable answer is retried like busy", L.namesReply("<html>").busy, true);
+check("names: an unreadable answer is unclear (a read is asked again; a proposal never)", SDK.reply("<html>").unclear, true);
+const FOUND = { ok: true, name: "alice", display: "alice.lez", account: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z", forwardedFrom: null, lapsed: false };
+check("payee through Names: a name shows who and the address", [L.payeeFromNames("alice", FOUND).ok, L.payeeFromNames("alice", FOUND).text], [true, "Pays alice · FLBC4V…BE2Z"]);
+check("payee through Names: a forward says where it points", L.payeeFromNames("old", { ...FOUND, forwardedFrom: "old" }).text, "Pays old (it points to alice) · FLBC4V…BE2Z");
+check("payee through Names: unknown, no account, can't check", [
+  L.payeeFromNames("nobdy", { ok: false, code: "not_registered", name: "nobdy" }).text.startsWith("No one holds the LNS name nobdy"),
+  L.payeeFromNames("empty", { ok: false, code: "no_account", name: "empty" }).text.startsWith("Can't pay empty by name"),
+  L.payeeFromNames("alice", { ok: false, code: "unavailable", error: "Names Wallet is busy." }).retry], [true, true, true]);
+check("the schedule is made for the account Names found, only for what is still typed", [
+  L.payeeAccount(L.payeeFromNames("alice", FOUND), "alice"), L.payeeAccount(L.payeeFromNames("alice", FOUND), "alicia"),
+  L.payeeAccount({ ok: true, base58: FOUND.account, text: "x" }, "alice"), L.payeeAccount(null, "alice")],
+  ["Public/" + FOUND.account, "", "", ""]);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);
@@ -214,13 +233,14 @@ check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.ne
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has vested to you\./.test(qml)], [false, false, true]);
-  check("names calls pass text only", [...qml.matchAll(/namesCall\("(\w+)",\s*(\[[^\]]*\])/g)].filter(m => /Number\(/.test(m[2])).map(m => m[1]), []);
+  check("Names goes through the SDK only: no hand-written names calls left", [/callModuleAsync\("names"/.test(qml), /NamesWallet \{ id: namesWallet/.test(qml), /namesWallet\.(connect|proposeCall|withdraw|resolve|check|disconnect)\(/.test(qml)], [false, true, true]);
+  check("names calls pass text only", [...qml.matchAll(/namesWallet\.\w+\(([^)]*)\)/g)].filter(m => /Number\(/.test(m[1])).map(m => m[0]), []);
   check("first run asks to connect Names Wallet, not for a wallet folder", [/What do you want to do\?/.test(qml) && /label: "Connect"/.test(qml), /Advanced: a wallet folder/.test(qml)], [true, true]);
 }
 
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;
-for (const file of ["./qml/Main.qml", "./qml/logic.mjs", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {
+for (const file of ["./qml/Main.qml", "./qml/logic.mjs", "./qml/NamesWalletSDK.mjs", "./qml/NamesWallet.qml", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8").split("\n");
   const dotted = source
     .map((line, i) => [i + 1, line.replace(/"(\\.|[^"\\])*"|'(\\.|[^'\\])*'|\/\/.*$/g, '""')])

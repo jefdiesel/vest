@@ -7,6 +7,8 @@
 // module's rows, formatting, the vesting maths for display, validation, next-unlock text, the
 // fee check, the privacy disclosure and the plain result lines — lives here, tested in Node.
 
+import * as SDK from "./NamesWalletSDK.mjs"
+
 /// The three schedule kinds the creator can choose.
 export const KINDS = ["cliff-linear", "linear", "milestone"]
 
@@ -631,55 +633,47 @@ export function payeeLine(typed, r) {
 }
 
 // ── Names Wallet ────────────────────────────────────────────────────────────────────
+// The calls, retries, states and request words are the Names Wallet SDK's (NamesWalletSDK.mjs,
+// copied unchanged from the Names repository); Vest keeps only its own words here.
 
-export const NAMES_MISSING = "Names Wallet isn't installed, or isn't open. Install Names from Basecamp's app list, open it once, then come back here."
+export const NAMES_MISSING = SDK.WORDS.missing
+export const requestLine = SDK.requestLine
+export const requestOpen = SDK.requestOpen
 
-/// A reply of the names module (Provider SDK): `{ok, value}`, `{ok: false, busy: true}` (nothing
-/// happened: ask again), `{ok: false, missing: true}` (Names isn't installed or open), or a
-/// refusal with its words.
-export function namesReply(raw) {
-    var parsed = raw
-    for (var depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
-        try { parsed = JSON.parse(parsed) } catch (error) { break }
-    }
-    if (parsed && typeof parsed === "object" && parsed.busy === true) return { ok: false, busy: true, error: "Names Wallet is busy." }
-    if (parsed && typeof parsed === "object" && parsed.success !== undefined)
-        return parsed.success ? { ok: true, value: parsed.value } : { ok: false, error: String(parsed.error || "Names Wallet said no.") }
-    var said = typeof raw === "string" ? raw : JSON.stringify(raw)
-    if (raw === undefined || raw === null || String(raw) === "") return { ok: false, busy: true, error: "No answer from Names Wallet yet." }
-    if (/not connected|not reachable|no such|unknown (module|method)|method not found|not found|not loaded|not installed|call refused/i.test(said || ""))
-        return { ok: false, missing: true, error: NAMES_MISSING }
-    // An answer that isn't the Provider SDK's shape: Names is usually being reloaded (a new
-    // version just installed). Retried like busy; said plainly if it lasts.
-    return { ok: false, busy: true, error: "Names Wallet isn't answering normally (it may be restarting). Try again in a moment." }
-}
-
+/// What Vest says when Names Wallet is on another network than Vest's.
+export const OTHER_ZONE = "Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names: Settings, Network), then come back."
 
 /// The `get_config` zone check: "" when Names Wallet is on `chainId`, else what to do.
 export function zoneProblem(config, chainId) {
-    var zone = config && config.zone ? config.zone : null
-    var channel = zone && zone.channel ? String(zone.channel).toLowerCase() : ""
-    if (!chainId || !channel) return ""
-    return channel === String(chainId).toLowerCase() ? "" : "Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names: Settings, Network), then come back."
+    return SDK.zoneMatches(config, chainId) ? "" : OTHER_ZONE
 }
 
-/// What a Names request's state means on screen, in one line ("" while nothing to say).
-export function requestLine(request, what) {
-    var r = request || {}
-    var thing = what || "the request"
-    if (r.state === "pending") return "Waiting for you to approve " + thing + " in Names Wallet."
-    if (r.state === "running") return "Names Wallet is sending " + thing + "…"
-    if (r.state === "rejected") return "You declined " + thing + " in Names Wallet. Nothing was sent."
-    if (r.state === "expired") return "Nobody approved " + thing + " within 10 minutes, so Names Wallet dropped it. Nothing was sent."
-    if (r.state === "cancelled") return "You withdrew " + thing + ". Nothing was sent."
-    if (r.state === "failed") return "Names Wallet couldn't send " + thing + (r.error ? ": " + r.error : "") + "."
-    return ""
+/// What the payout box resolved to through Names Wallet (the SDK's `resolve`), as the line
+/// under it: `{ok, text}`, and for a name found `{via: "names", typed, account, resolved}`, the
+/// account the schedule is then made for.
+export function payeeFromNames(typed, r) {
+    var t = String(typed == null ? "" : typed).trim()
+    var x = r || {}
+    if (x.ok && x.account) {
+        var asked = x.forwardedFrom || x.name
+        return {
+            ok: true, via: "names", typed: t, account: x.account,
+            resolved: [{ name: asked, base58: x.account }],
+            text: x.forwardedFrom ? "Pays " + clean(x.forwardedFrom) + " (it points to " + clean(x.name) + ") · " + short(x.account)
+                                  : "Pays " + clean(x.name) + " · " + short(x.account)
+        }
+    }
+    if (x.code === "not_registered") return { ok: false, text: "No one holds the LNS name " + clean(t) + ". Check the spelling, or paste their address." }
+    if (x.code === "no_account") return { ok: false, text: "Can't pay " + clean(t) + " by name: its LNS record names no account to pay. Paste their address." }
+    if (x.code === "unavailable" || x.code === "missing") return { ok: false, retry: true, text: "Couldn't check " + clean(t) + " just now: " + clean(x.error || "") }
+    return { ok: false, text: "That isn't an address or an LNS name Vest can find" + (x.error ? ": " + clean(x.error) : ".") }
 }
 
-/// Whether a Names request is still open (keep polling).
-export function requestOpen(request) {
-    var s = (request || {}).state
-    return s === "pending" || s === "running"
+/// The account a schedule is made for when Names Wallet looked up what is in the payout box
+/// (`payee` from payeeFromNames, still for `typed`): "Public/<id>", else "".
+export function payeeAccount(payee, typed) {
+    var p = payee || {}
+    return p.ok && p.via === "names" && p.account && p.typed === String(typed == null ? "" : typed).trim() ? "Public/" + p.account : ""
 }
 
 /// Names `granted_accounts` + `account_balances` as the vesting module's `set_accounts` input.

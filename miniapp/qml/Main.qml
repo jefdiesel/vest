@@ -3,8 +3,10 @@
 // Two modules do the work. The `vesting` core module (../module) reads the network: schedules,
 // the clock, what is claimable, and builds the claim call. The person's Names Wallet (the `names`
 // module, its Wallet Provider SDK) shows Vest the accounts the person chooses and signs every
-// change once the person approves it in the Names app: Vest never sees a key. People without
-// Names Wallet can give a wallet folder instead (Settings, Advanced).
+// change once the person approves it in the Names app: Vest never sees a key. Vest talks to it
+// through the Names Wallet SDK (NamesWallet.qml + NamesWalletSDK.mjs, copied unchanged from the
+// Names repository's sdk/qml/). People without Names Wallet can give a wallet folder instead
+// (Settings, Advanced).
 //
 // Guides are built in: a "How it works" path for paying out and for receiving, shown on first run
 // and one click from the header; the choices explained where they are made; what happens next
@@ -31,16 +33,17 @@ Item {
     readonly property bool chainOpen: info !== null && info.connected === true
     readonly property bool walletMode: info !== null && info.signer === "wallet"
 
-    // ── Names Wallet ───────────────────────────────────────────────────────────────
+    // ── Names Wallet (the Names Wallet SDK) ────────────────────────────────────────
+    NamesWallet { id: namesWallet; bridge: typeof logos !== "undefined" ? logos : null }
     // "checking" | "missing" | "otherZone" | "disconnected" | "asking" | "connected"
-    property string namesState: "checking"
-    property string namesProblem: ""
+    readonly property string namesState: namesWallet.status
+    readonly property string namesProblem: namesState === "otherZone" ? Logic.OTHER_ZONE : namesWallet.problem
     property var accessRequest: null           // the connect request while it waits
     property var claimRequest: null            // the claim request while it waits
+    property var claimWatch: null              // its watch (withdraw)
     property var writeRequest: null            // a create, cancel, permanent, milestone or transfer while it waits
-    property bool namesCanCall: false          // Names Wallet 0.18+: its calls may read the network clock
-    property var granted: null
-    property var balances: []
+    // Names Wallet 0.18+: its calls may read the network clock
+    readonly property bool namesCanCall: namesWallet.features.indexOf("call_reads_clock") >= 0
     readonly property bool connected: walletMode ? chainOpen : (namesState === "connected" && chainOpen)
     // Who signs creates, cancels, milestones and transfers: the wallet folder, or Names Wallet 0.18+.
     readonly property bool canWrite: walletMode || namesCanCall
@@ -125,94 +128,42 @@ Item {
             })
     }
 
-    // ── Names Wallet (its Wallet Provider SDK) ─────────────────────────────────────
+    // ── Names Wallet (the Names Wallet SDK: busy retry, one timer per wait, states) ──
 
-    /// One call of the names module. Busy means nothing happened: ask again, a little later
-    /// each time. Missing means Names isn't installed or open.
-    function namesCall(method, args, done, failed, tries) {
-        var n = tries || 0
-        var no = failed || function(r) { root.say(r.error, true) }
-        if (!bridgeReady) { no({ ok: false, missing: true, error: Logic.NAMES_MISSING }); return }
-        logos.callModuleAsync("names", method, args, function(raw) {
-            var r = Logic.namesReply(raw)
-            if (r.ok) { done(r.value); return }
-            if (r.busy && n < 5) { root.later(function() { root.namesCall(method, args, done, failed, n + 1) }, 1500 * (n + 1)); return }
-            if (r.missing) { root.namesState = "missing"; root.namesProblem = r.error }
-            no(r)
-        }, 30000)
-    }
-
-    /// Run `f` once after `ms`. Each call gets its own timer: two busy Names calls retrying at the
-    /// same time each come back (one shared timer kept only the last).
-    function later(f, ms) {
-        var t = oneShot.createObject(root, { interval: ms })
-        t.then = f
-        t.start()
-    }
-
-    Component {
-        id: oneShot
-        Timer {
-            property var then: null
-            onTriggered: { var f = then; then = null; destroy(); if (f) f() }
-        }
-    }
-
-    /// Where Names Wallet stands: installed and open, on our network, and which accounts it gave.
+    /// Where Names Wallet stands (installed and open, on our network, which accounts it gave),
+    /// then the vesting module is told the accounts and the chain is read.
     function readNames() {
-        namesCall("get_config", [], function(config) {
-            root.namesCanCall = ((config && config.features) || []).indexOf("call_reads_clock") >= 0
-            var zone = Logic.zoneProblem(config, info && info.network ? info.network.chain_id : "")
-            if (zone !== "") { namesState = "otherZone"; namesProblem = zone; loading = false; return }
-            namesCall("granted_accounts", [], function(g) {
-                granted = g
-                if (!g || !g.connected || !(g.accounts || []).length) {
-                    if (namesState !== "asking") namesState = "disconnected"
-                    loading = false
-                    return
-                }
-                namesState = "connected"
-                namesCall("account_balances", [], function(b) {
-                    balances = b || []
-                    call("set_accounts", [JSON.stringify(Logic.namesAccounts(granted, balances))], function() { readChain() })
-                }, function() {
-                    call("set_accounts", [JSON.stringify(Logic.namesAccounts(granted, []))], function() { readChain() })
-                })
-            }, function(r) { loading = false })
-        }, function(r) { loading = false })
-    }
-
-    /// Take the person to the Names app, where the request waits; Names brings them back here
-    /// once they answer (Basecamp's own navigation intent, declared in metadata.json `uses`).
-    function openNames() {
-        if (typeof logos !== "undefined" && logos.request)
-            logos.request("basecamp.apps.launch", { app: "names_ui" }, function() {})
-    }
-
-    /// 1. Connect: the person picks, in the Names app, which accounts Vest may see.
-    function connectNames() {
-        say("")
-        namesCall("request_access", ["To show your vesting schedules and claim what has vested to you"], function(v) {
-            if (v.state === "approved") { readNames(); say("Connected.", false, Logic.nextLine("connect")); return }
-            accessRequest = v
-            namesState = "asking"
-            pollAccess.start()
-            openNames()
+        namesWallet.check({ chain: info && info.network ? info.network.chain_id : "" }, function(w) {
+            if (w.state !== "connected") { loading = false; return }
+            namesAccountsRead(w.accounts)
         })
     }
 
-    Timer {
-        id: pollAccess
-        interval: 2000
-        repeat: true
-        onTriggered: root.namesCall("request_status", [root.accessRequest.request], function(v) {
-            root.accessRequest = v
-            if (v.state === "pending") return
-            pollAccess.stop()
-            root.accessRequest = null
-            if (v.state === "approved") { root.readNames(); root.say("Connected.", false, Logic.nextLine("connect")) }
-            else { root.namesState = "disconnected"; root.say(Logic.requestLine(v, "the connection"), true) }
-        }, function(r) { pollAccess.stop(); root.namesState = "disconnected"; root.say(r.error, true) })
+    function namesAccountsRead(accounts) {
+        namesWallet.balances(function(b) {
+            call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, b))], function() { readChain() })
+        }, function() {
+            call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, []))], function() { readChain() })
+        })
+    }
+
+    /// 1. Connect: the person picks, in the Names app, which accounts Vest may see. The SDK takes
+    /// them to Names (Basecamp's navigation intent, declared in metadata.json `uses`) and Names
+    /// brings them back once they answer.
+    function connectNames() {
+        say("")
+        namesWallet.connect("To show your vesting schedules and claim what has vested to you", {}, {
+            waiting: function(v) { root.accessRequest = v },
+            done: function(v) {
+                root.accessRequest = null
+                if (v.state === "approved") {
+                    if (namesWallet.status === "connected") namesAccountsRead(namesWallet.accounts)
+                    else loading = false
+                    say("Connected.", false, Logic.nextLine("connect"))
+                } else say(Logic.requestLine(v, "the connection"), true)
+            },
+            failed: function(r) { root.accessRequest = null; say(r.error, true) }
+        })
     }
 
     // ── Reading ─────────────────────────────────────────────────────────────────────
@@ -402,12 +353,23 @@ Item {
         if (c.names) {
             busy = true
             workingOn = "claim"
-            namesCall("propose_call", [c.names.program, c.names.accounts_json, c.names.instruction_hex, c.names.summary], function(v) {
-                claimRequest = v
-                claimRequest.amountDisplay = c.amountDisplay
-                pollClaim.start()
-                openNames()
-            }, function(r) { busy = false; workingOn = ""; say(r.error, true) })
+            var shown = function(v) { v.amountDisplay = c.amountDisplay; root.claimRequest = v }
+            namesWallet.proposeCall(c.names.program, c.names.accounts_json, c.names.instruction_hex, c.names.summary, {
+                sent: function(v, watch) { root.claimWatch = watch; shown(v) },
+                update: shown,
+                done: function(v) {
+                    v.amountDisplay = c.amountDisplay
+                    root.busy = false
+                    root.workingOn = ""
+                    root.claimRequest = null
+                    root.claimWatch = null
+                    root.confirm = null
+                    if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · tx " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
+                    else root.say(Logic.requestLine(v, "the claim"), v.state === "failed")
+                    root.refresh()
+                },
+                failed: function(r) { root.claimRequest = null; root.claimWatch = null; busy = false; workingOn = ""; say(r.error, true) }
+            })
             return
         }
         if (c.isPrivate) say("Proving the private claim on this computer; this takes a few minutes.")
@@ -418,28 +380,8 @@ Item {
         }, c.isPrivate ? 3600000 : 300000)
     }
 
-    Timer {
-        id: pollClaim
-        interval: 2000
-        repeat: true
-        onTriggered: root.namesCall("request_status", [root.claimRequest.request], function(v) {
-            v.amountDisplay = root.claimRequest.amountDisplay
-            root.claimRequest = v
-            if (Logic.requestOpen(v)) return
-            pollClaim.stop()
-            root.busy = false
-            root.workingOn = ""
-            root.claimRequest = null
-            root.confirm = null
-            if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · tx " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
-            else root.say(Logic.requestLine(v, "the claim"), v.state === "failed")
-            root.refresh()
-        }, function(r) { pollClaim.stop(); root.busy = false; root.workingOn = ""; root.say(r.error, true) })
-    }
-
     function withdrawClaim() {
-        if (!claimRequest) return
-        namesCall("cancel_request", [claimRequest.request], function() {})
+        if (claimRequest) namesWallet.withdraw(claimRequest.request, function() {}, function(r) { say(r.error, true) })
     }
 
     function doTransfer(id, target) {
@@ -483,37 +425,39 @@ Item {
         workingOn = what
         call(method, args, function(r) {
             if (!r.ok) { busy = false; workingOn = ""; say(r.error, true); return }
-            namesCall("propose_call", [r.program, r.accounts_json, r.instruction_hex, r.summary], function(v) {
-                writeRequest = { request: v.request, built: r, done: done, what: Logic.writeWhat(what) }
-                say("In Names Wallet, choose " + Logic.labelled(r.caller, root.names) + " and approve. You come back here after.")
-                pollWrite.start()
-                openNames()
-            }, function(e) { busy = false; workingOn = ""; say(e.error, true) })
+            var thing = Logic.writeWhat(what)
+            namesWallet.proposeCall(r.program, r.accounts_json, r.instruction_hex, r.summary, {
+                sent: function(v) {
+                    root.writeRequest = { request: v.request, built: r, done: done, what: thing }
+                    root.say("In Names Wallet, choose " + Logic.labelled(r.caller, root.names) + " and approve. You come back here after.")
+                },
+                done: function(v) {
+                    root.writeRequest = null
+                    root.busy = false
+                    root.workingOn = ""
+                    if (v.state === "done") done(r, v)
+                    else root.say(Logic.requestLine(v, thing), v.state === "failed")
+                    root.refresh()
+                },
+                failed: function(e) { root.writeRequest = null; root.busy = false; root.workingOn = ""; root.say(e.error, true) }
+            })
         }, 120000)
     }
 
-    Timer {
-        id: pollWrite
-        interval: 2000
-        repeat: true
-        onTriggered: root.namesCall("request_status", [root.writeRequest.request], function(v) {
-            if (Logic.requestOpen(v)) return
-            pollWrite.stop()
-            var w = root.writeRequest
-            root.writeRequest = null
-            root.busy = false
-            root.workingOn = ""
-            if (v.state === "done") w.done(w.built, v)
-            else root.say(Logic.requestLine(v, w.what), v.state === "failed")
-            root.refresh()
-        }, function(e) { pollWrite.stop(); root.writeRequest = null; root.busy = false; root.workingOn = ""; root.say(e.error, true) })
-    }
-
     /// Look up what was typed in the payout box (an LNS name or an address) and say who it is.
+    /// A name goes to Names Wallet's own lookup when it is connected (the schedule is then made
+    /// for the account Names found); otherwise, and for an address, to the vesting module.
     function checkPayee() {
         var t = beneficiaryField.text.trim()
         if (t === "") { payee = null; return }
         payee = { ok: false, checking: true, text: "Checking " + t + "…" }
+        if (!walletMode && namesState === "connected" && Logic.accountKind(t) === "name") {
+            namesWallet.resolve(t, function(r) {
+                if (beneficiaryField.text.trim() !== t) return
+                payee = Logic.payeeFromNames(t, r)
+            })
+            return
+        }
         call("resolve_name", [t], function(r) {
             if (beneficiaryField.text.trim() !== t) return
             payee = Logic.payeeLine(t, r)
@@ -527,16 +471,20 @@ Item {
         if (!root.batchMode && root.payee && !root.payee.ok && !root.payee.checking) { say(root.payee.text, true); return }
         var p = sharedParams()
         p.beneficiary = beneficiaryField.text.trim()
+        // A name Names Wallet looked up: the schedule is for the account it found.
+        var found = !walletMode ? Logic.payeeAccount(root.payee, p.beneficiary) : ""
+        if (found !== "") p.beneficiary = found
         p.amount = amountOf(amountField.text)
         p.tranches = cKind === "milestone" ? cTranches.map(amountOf) : []
         var v = Logic.validateCreate(p)
         if (!v.ok) { say(v.errors[0], true); return }
         if (!walletMode) {
+            var looked = found !== "" ? root.payee.resolved : []
             namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
                 justCreated = true
                 call("import_schedule", [built.schedule_address], function(imp) {
                     var id = imp.ok ? imp.id : ""
-                    say(Logic.resolvedLines(built.resolved).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
+                    say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
                         false, Logic.nextLine("create", { id: id }))
                     refresh()
                 }, 60000)
@@ -1115,7 +1063,7 @@ Item {
                 Heading { text: "Signing" }
                 Body { text: root.walletMode ? "Vest signs with the wallet folder below." : "Vest signs through Names Wallet: you approve every payment and claim in the Names app." }
                 Action { look: root.look; visible: root.walletMode; strong: true; label: "Use Names Wallet instead"; changes: true; busy: root.busy; onPressed: root.saveSettings("names") }
-                Link { look: root.look; visible: !root.walletMode && root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: root.namesCall("drop_access", [], function() { root.namesState = "disconnected"; root.accounts = []; root.schedules = [] }) }
+                Link { look: root.look; visible: !root.walletMode && root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: namesWallet.disconnect(function() { root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
             }
 
             TechDetails {

@@ -5,7 +5,7 @@ Two Basecamp packages:
 | Package | Folder | What it is |
 |---|---|---|
 | `vesting` (core module) | `module/` | The module: a Rust crate (`module/rust-lib`, trait `VestingModule`) over `module/core` (`vesting-module-core`), which calls the SDK's `Client` with `LezBackend`: a LEZ rc3 wallet and RPC. Built with `logos-module-builder`'s `mkLogosModule`. |
-| `vesting_ui` (app) | this folder | The view: `qml/Main.qml` and `qml/logic.mjs`, no C++. It calls the module with `logos.callModuleAsync("vesting", method, args, …)`. Built with `mkLogosQmlModule`; depends on `vesting`. |
+| `vesting_ui` (app) | this folder | The view: `qml/Main.qml` and `qml/logic.mjs`, no C++, plus the Names Wallet SDK (`qml/NamesWallet.qml`, `qml/NamesWalletSDK.mjs`). It calls the module with `logos.callModuleAsync("vesting", method, args, …)`. Built with `mkLogosQmlModule`; depends on `vesting`. |
 
 The module's calls (`module/rust-lib/src/lib.rs`; each answers JSON `{"ok":true,…}` or
 `{"ok":false,"error":…,"code":…}`):
@@ -20,14 +20,22 @@ The module's calls (`module/rust-lib/src/lib.rs`; each answers JSON `{"ok":true,
 | `claim_public(id)`, `claim_private(id, target)` | `Client::claim_public` / `claim_private`. A private target must be a private account the wallet holds (else code 1001), and a claim whose private destination could not pay the simulated fee is not sent. |
 | `cancel(id)`, `make_irrevocable(id)`, `signal_milestone(id, index)`, `transfer_beneficiary(id, to)` | The matching `Client` calls. |
 | `import_schedule(account)` | Gives a schedule account made elsewhere a local id, so its beneficiary sees it. |
-| `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). The app calls it as the payout box is typed in. |
+| `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). The app calls it as the payout box is typed in, with a wallet folder or without Names Wallet, and for an address; with Names Wallet connected a name is looked up through Names instead (below). |
 | `set_accounts(json)`, `claim_call(id)` | Names Wallet mode: the accounts Names granted, and a public LEZ claim built as a Names `propose_call` (program, accounts, instruction, summary). |
 | `create_call(params)`, `cancel_call(id)`, `irrevocable_call(id)`, `signal_call(id, index)`, `transfer_call(id, new_beneficiary)` | Names Wallet 0.18+ mode: the same change built as a Names `propose_call` (`{program, accounts_json, instruction_hex, summary, caller}`); the person approves it in Names, choosing `caller`. |
 
-The app talks to Names Wallet directly (`logos.callModuleAsync("names", …)`: `request_access`,
-`granted_accounts`, `account_balances`, `propose_call`, `request_status`) and takes the person to
-Names with Basecamp's navigation intent (`logos.request("basecamp.apps.launch", { app: "names_ui" })`,
-declared in `metadata.json` `uses`); Names brings them back once the request is answered.
+The app talks to Names Wallet through the **Names Wallet SDK** 1.0.0: `qml/NamesWallet.qml` and
+`qml/NamesWalletSDK.mjs`, copied unchanged from the Names repository's `sdk/qml/` (as the kit is
+copied; `logic.test.mjs` checks their hashes, so a new copy is a deliberate change). The SDK
+makes every names call (`get_config`, `request_access`, `granted_accounts`, `account_balances`,
+`propose_call`, `request_status`, `cancel_request`, `drop_access`, `resolve`), retries busy ones
+on a timer each, never sends a proposal twice, says each state in plain words, and takes the
+person to Names with Basecamp's navigation intent (`basecamp.apps.launch`, declared in
+`metadata.json` `uses`); Names brings them back once the request is answered. With Names
+connected, an LNS name typed in the payout box is looked up through Names' own `resolve`
+(`namesWallet.resolve`), and the schedule is made for the account Names found. Vest keeps only
+its own words in `logic.mjs`. The SDK's reference: Names `docs/wallet/PROVIDER-SDK.md`, "Drop-in
+SDK for apps", where Vest is the worked example.
 
 The acting account is never chosen by the view: it is the schedule's beneficiary (claim,
 transfer), cancel authority (cancel, make irrevocable) or milestone authority (signal), and the
@@ -48,7 +56,7 @@ unless it is local (`127.0.0.1`).
 ## Build and test
 
 ```sh
-node --test miniapp/logic.test.mjs                 # the view's logic (111 tests)
+node --test miniapp/logic.test.mjs                 # the view's logic (143 tests)
 cargo test -p vesting-module-core                  # every module call on the JSON test ledger (13 tests)
 cargo build -p vesting-module-core --features lez  # the chain build of the module's core
 ```
@@ -70,10 +78,11 @@ module's own two crates. Loading and clicking through: [`docs/BASECAMP-TEST.md`]
 loads: it lists every undefined symbol nothing provides (the plugin links with
 `-undefined dynamic_lookup`, so a missing library only shows at load) and dlopens it.
 
-`tools/render.py` renders `qml/Main.qml` offscreen at 1250x700 with a stand-in module (11
-scenarios: first run, no schedules, a schedule, public and private confirmations, a fee the
-private account can't pay, create, the cancel confirmation, settings, a wrong wallet folder, the
-module missing) and fails on any QML error.
+`tools/render.py` renders `qml/Main.qml` offscreen at 1250x700 with a stand-in vesting module
+and Names Wallet (25 scenarios: first run, connecting, Names missing or on another network, the
+guides, no schedules, a schedule, a claim waiting in Names and its result, create, the payout
+box's lookup with a wallet folder and through Names, the cancel confirmation, settings, a wrong
+wallet folder) and fails on any QML error.
 
 The screen uses the shared kit in `qml/kit/` (Look, Action, PageHeader, Field, FactRow,
 TechDetails, Tick, Link, RunsOn, BackButton), copied unchanged from the Program Registry browser
