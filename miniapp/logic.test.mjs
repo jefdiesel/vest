@@ -230,3 +230,181 @@ for (const file of ["./qml/Main.qml", "./qml/logic.mjs", ...["Action", "BackButt
   check(`no reserved word after a dot in ${file}`, dotted, []);
 }
 
+// ── Extra coverage: exports with no test, or only a one-line assertion ───────────────
+// Amounts stay decimal strings; times are epoch ms. The BUG-marked checks below are meant to
+// fail: they show a wrong result for an ordinary input. logic.mjs is not changed in this job.
+
+// cmpDec, decSub and sumAmounts were only exercised indirectly through atLeast/above/vested.
+check("cmpDec: order, leading zeros, null, u128 boundary", [
+  L.cmpDec("0", "0"), L.cmpDec("2", "10"), L.cmpDec("10", "2"), L.cmpDec("0002", "2"),
+  L.cmpDec(null, "0"), L.cmpDec(U128, String(BigInt(U128) - 1n))
+], [0, -1, 1, 0, 0, 1]);
+check("decSub: zeros, borrows, u128", [
+  L.decSub("0", "0"), L.decSub("1000", "1"), L.decSub("000100", "99"), L.decSub(U128, "1")
+], ["0", "999", "1", (BigInt(U128) - 1n).toString()]);
+check("sumAmounts: empty, null, several, leading zeros, u128", [
+  L.sumAmounts([]), L.sumAmounts([null]), L.sumAmounts(["1", "2", "3"]),
+  L.sumAmounts(["0002", "7"]), L.sumAmounts([U128, "0"])
+], ["0", "0", "6", "9", U128]);
+
+// isNative and txText had only indirect coverage.
+check("isNative: LEZ, zero account, a token id", [
+  L.isNative(""), L.isNative(null), L.isNative(" lez "), L.isNative("0".repeat(64)),
+  L.isNative(ID), L.isNative("LEZ ")
+], [true, true, true, true, false, true]);
+check("txText: nothing, a hash, a block", [
+  L.txText(null), L.txText({}), L.txText({ hash: "c5d782913d8819b009c8d15815697b20" }),
+  L.txText({ hash: "c5d782913d8819b009c8d15815697b20", block: 39066 })
+], ["", "", "tx c5d782…7b20", "tx c5d782…7b20 in block 39066"]);
+
+// isFullyClaimed and isClosed: empty, zero, partial, cancelled, fully claimed, u128.
+check("isFullyClaimed: empty, zero, partial, exact, u128", [
+  L.isFullyClaimed({}), L.isFullyClaimed({ total: "0", claimed: "0" }),
+  L.isFullyClaimed({ total: "100", claimed: "99" }), L.isFullyClaimed({ total: "100", claimed: "000100" }),
+  L.isFullyClaimed({ total: U128, claimed: U128 })
+], [false, true, false, true, true]);
+check("isClosed: cancelled, claimed out, still live", [
+  L.isClosed({}), L.isClosed({ cancelled: true, total: "10", claimed: "0" }),
+  L.isClosed({ total: "10", claimed: "10" }), L.isClosed({ total: "10", claimed: "9" })
+], [false, true, true, false]);
+
+// Vesting maths around a full claim and a cancellation that froze the vested amount.
+check("a fully claimed schedule has nothing claimable or locked", [
+  L.vested(DONE, NOW), L.claimable(DONE, NOW), L.locked(DONE, NOW)
+], ["500", "0", "0"]);
+check("a cancelled schedule keeps only its frozen amount claimable", [
+  L.claimable({ ...LINEAR, cancelled: true, vestedAtCancel: "500000", claimed: "200000" }, LINEAR.end),
+  L.locked({ ...LINEAR, cancelled: true, vestedAtCancel: "500000" }, LINEAR.end)
+], ["300000", "500000"]);
+
+// inText and dateText at the boundaries their headers promise.
+check("inText: zero, seconds, minutes, a day and a half", [
+  L.inText(-5, NOW), L.inText(1, NOW), L.inText(59999, NOW), L.inText(60000, NOW),
+  L.inText(3600000 - 1, NOW), L.inText(DAY, NOW), L.inText(DAY + 12 * 3600000, NOW)
+], ["now", "in 1 s", "in 1 min", "in 1 min", "in 1 h", "in 1 day", "in 1 day 12 h"]);
+check("dateText: epoch and a normal date", [L.dateText(0), L.dateText(NOW)], ["1970-01-01", "2026-11-20"]);
+// Fixed (found by these tests):
+check("dateText: an invalid date should be empty", [L.dateText("not a date"), L.dateText(undefined), L.dateText(null)], ["", "", ""]);
+// Fixed (found by these tests):
+check("inText: one millisecond under a day", L.inText(DAY - 1, NOW), "in 1 day");
+
+// nextUnlock: the end boundary and a row with no dates.
+check("nextUnlock: at the end there is nothing left", [
+  L.nextUnlock(LINEAR, LINEAR.end).at, L.nextUnlock(LINEAR, LINEAR.end).text
+], [0, "Fully vested — nothing left to unlock."]);
+check("nextUnlock: a row with no dates", L.nextUnlock({}, NOW).text, "Fully vested — nothing left to unlock.");
+// Fixed (found by these tests):
+check("nextUnlock: fewer signals than tranches", [
+  L.nextUnlock({ ...MILE, signalled: [] }, NOW).text,
+  L.nextUnlock({ ...MILE, signalled: [true] }, NOW).text
+], ["Next unlock: tranche 1 — signalled by the creator.", "Next unlock: tranche 2 — signalled by the creator."]);
+
+// Fee coverage and payer names not reached by the existing feeCheck assertions.
+check("feeCheck: unknown coverage, private payer", [
+  L.feeCheck({ fee_simulated: true, estimated_fee_display: "1 LEZ" }).message,
+  L.feeCheck({ fee_simulated: true, fee_covered: true, fee_payer: "claim_target", estimated_fee_display: "2 LEZ" }).message
+], ["Estimated fee 1 LEZ.", "The private account (paid from what the claim brings it) can pay the estimated fee of 2 LEZ."]);
+
+// connectProblem: an unreachable RPC, an unknown reason, and a wallet not opened yet.
+check("connectProblem: unreachable, unknown, quiet", [
+  /Can't reach the network/.test(L.connectProblem({ connected: false, status: "getChannelId timed out", settings: { wallet_dir: "/w" } })),
+  L.connectProblem({ connected: false, status: "Not connected: odd thing", settings: { wallet_dir: "/w" } }),
+  L.connectProblem({ connected: false, status: "", settings: { wallet_dir: "/w" } })
+], [true, "Couldn't connect: odd thing.", ""]);
+
+// clean and the payee/reply fallbacks that earlier checks did not reach.
+check("clean: length, null, control and bidi characters", [
+  L.clean("x".repeat(250)).length, L.clean(null), L.clean("a\u0000b\u202ec")
+], [200, "", "abc"]);
+check("payeeLine: a rate limit is retryable", (() => {
+  const p = L.payeeLine("alice", { ok: false, error: "429 too many requests" });
+  return [p.ok, p.retry, /Couldn't check alice/.test(p.text), /429/.test(p.text)];
+})(), [false, true, true, true]);
+check("payeeLine: an unrecognised refusal, and no reason at all", [
+  L.payeeLine("bob", { ok: false, error: "nope" }).text,
+  L.payeeLine("bob", { ok: false }).text
+], ["That isn't an address or an LNS name Vest can find: nope", "That isn't an address or an LNS name Vest can find."]);
+check("namesReply: twice encoded, null, an empty refusal, a bad answer", [
+  L.namesReply(JSON.stringify(JSON.stringify({ success: true, value: 7 }))).value,
+  L.namesReply(null).busy,
+  L.namesReply({ success: false, error: "" }).error,
+  /isn't answering normally/.test(L.namesReply("<html>").error)
+], [7, true, "Names Wallet said no.", true]);
+
+// requestLine: the states not in the earlier check.
+check("requestLine: running, expired, cancelled, failed, nothing", [
+  L.requestLine({ state: "running" }, "the claim"),
+  L.requestLine({ state: "expired" }, "the claim"),
+  L.requestLine({ state: "cancelled" }, "the claim"),
+  L.requestLine({ state: "failed", error: "no fee" }, "the claim"),
+  L.requestLine(null, "the claim"),
+  L.requestOpen({ state: "pending" }), L.requestOpen(null)
+], [
+  "Names Wallet is sending the claim…",
+  "Nobody approved the claim within 10 minutes, so Names Wallet dropped it. Nothing was sent.",
+  "You withdrew the claim. Nothing was sent.",
+  "Names Wallet couldn't send the claim: no fee.",
+  "", true, false
+]);
+
+// Guides and result lines: boundaries and the remaining actions.
+check("guideSteps: before the first and past the last step", [
+  L.guideSteps("receive", -1).map(s => s.state), L.guideSteps("receive", 9).map(s => s.state)
+], [Array(5).fill("later"), Array(5).fill("done")]);
+check("guide steps: approving wins over a claim or a new schedule", [
+  L.receiveStep({ connected: true, schedules: true, claimable: true, approving: true }),
+  L.payStep({ connected: true, approving: true, justCreated: true, manages: true })
+], [4, 2]);
+check("nextLine: every remaining action", [
+  L.nextLine("batch"), L.nextLine("claim", { next: "in 3 days" }), L.nextLine("cancel"),
+  L.nextLine("irrevocable"), L.nextLine("signal"), L.nextLine("transfer"), L.nextLine("connect")
+], [
+  "The schedules are live. Send each person their schedule's address or your LNS name.",
+  "The tokens are in your account. Come back when more unlocks (in 3 days).",
+  "Nothing more unlocks. What had already vested stays theirs to claim.",
+  "Nobody can cancel it any more; it runs to the end.",
+  "They can claim that part now.",
+  "The new beneficiary claims from now on; send them the schedule's address.",
+  "Connected. Your schedules are below; if someone sent you one, paste its address."
+]);
+check("writeWhat: the other write names", [L.writeWhat("irrevocable:3"), L.writeWhat("transfer:3")], ["making it permanent", "the transfer"]);
+check("an unknown kind reads as linear in words and on the timeline", [
+  L.kindExplain("x"), L.timeline("x")
+], [L.kindExplain("linear"), L.timeline("linear")]);
+
+// Accounts and amounts at the edges not covered above.
+check("accountKind: empty, upper-case hex, a dotted name, a prefixed hex id", [
+  L.accountKind(""), L.accountKind(null), L.accountKind(HEXID.toUpperCase()),
+  L.accountKind("alice.name"), L.accountKind("Public/" + HEXID)
+], ["", "", "hex", "name", ""]);
+check("base58Of: empty and all-zero accounts", [L.base58Of(""), L.base58Of("0".repeat(64))], ["", "1".repeat(32)]);
+check("fromModule: a null row", [L.fromModule(null).kind, L.fromModule(null).tranches], ["", []]);
+const BIGAMT = "123456789012345678901234567890";
+check("toBase: zero decimals, a large amount, spaces and commas", [
+  L.toBase("0.5", 0), L.toBase(BIGAMT), L.toBase(" 1,000.5 ")
+], ["", BIGAMT + "000000000", "1000500000000"]);
+
+// The last one-line formatting helpers: empty input and the default token.
+check("grouped, amountText and short: empty and boundary lengths", [
+  L.grouped(null), L.grouped(""), L.grouped("1234567"),
+  L.amountText("1000", ""), L.amountText("1000", "USDC"),
+  L.short(null), L.short("12345678901234"), L.short("123456789012345")
+], ["null", "", "1,234,567", "1,000 LEZ", "1,000 USDC", "null", "12345678901234", "123456…2345"]);
+check("parseDate: empty and null are not a date", [
+  Number.isNaN(L.parseDate("")), Number.isNaN(L.parseDate(null)), L.parseDate(" 2026-11-23 ")
+], [true, true, Date.UTC(2026, 10, 23)]);
+check("hostOf: no scheme, a port, nothing", [
+  L.hostOf("lez.nameswallet.app"), L.hostOf("https://x:8080/a"), L.hostOf(null)
+], ["lez.nameswallet.app", "x:8080", ""]);
+check("resolvedLines: none and several", [
+  L.resolvedLines([]), L.resolvedLines([{ name: "a", base58: "B" }, { name: "c", base58: "D" }])
+], [[], ["a resolves to B.", "c resolves to D."]]);
+check("zoneProblem: no zone or no chain to compare", [
+  L.zoneProblem(null, "2da7"), L.zoneProblem({ zone: { channel: "2da7" } }, ""),
+  L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7")
+], ["", "", ""]);
+check("firstRun and the small result lines at zero", [
+  L.firstRun(null), L.firstRun({ connected: false, settings: {} }),
+  L.batchLine(0), L.signalLine(0, "X")
+], [false, true, "Created 0 schedules.", "Signalled milestone 1 on X."]);
+

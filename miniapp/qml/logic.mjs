@@ -48,7 +48,8 @@ export function short(text) {
 
 /// Epoch ms → "2026-11-23" (UTC).
 export function dateText(ms) {
-    var d = new Date(num(ms))
+    if (ms === null || ms === undefined || ms === "" || !isFinite(Number(ms))) return ""
+    var d = new Date(Number(ms))
     return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10)
 }
 
@@ -61,13 +62,15 @@ export function parseDate(text) {
 export function inText(ms, now) {
     ms = num(ms)
     if (ms <= 0) return "now"
-    if (ms < MINUTE) return "in " + Math.ceil(ms / 1000) + " s"
-    if (ms < HOUR) return "in " + Math.ceil(ms / MINUTE) + " min"
-    if (ms < DAY) {
-        var h = Math.floor(ms / HOUR), m = Math.ceil((ms % HOUR) / MINUTE)
+    // Round up once, to the unit shown, then carry: never "60 s", "60 min" or "24 h".
+    if (ms < MINUTE - 999) return "in " + Math.ceil(ms / 1000) + " s"
+    var mins = Math.ceil(ms / MINUTE)
+    if (mins < 60) return "in " + mins + " min"
+    if (mins < 24 * 60) {
+        var h = Math.floor(mins / 60), m = mins % 60
         return "in " + h + " h" + (m > 0 ? " " + m + " min" : "")
     }
-    var d = Math.floor(ms / DAY), rh = Math.round((ms % DAY) / HOUR)
+    var hours = Math.round(ms / HOUR), d = Math.floor(hours / 24), rh = hours % 24
     return "in " + d + " day" + (d !== 1 ? "s" : "") + (rh > 0 ? " " + rh + " h" : "")
 }
 
@@ -247,9 +250,9 @@ export function locked(s, t) {
 export function nextUnlock(s, now) {
     s = s || {}
     if (s.kind === "milestone") {
-        var sg = s.signalled || [], i = 0
-        while (i < sg.length && sg[i]) i++
-        if (i >= sg.length) return { at: 0, text: "All milestones signalled." }
+        var sg = s.signalled || [], n = Math.max((s.tranches || []).length, sg.length), i = 0
+        while (i < n && sg[i]) i++
+        if (i >= n) return { at: 0, text: "All milestones signalled." }
         return { at: 0, text: "Next unlock: tranche " + (i + 1) + " — signalled by the creator." }
     }
     if (s.kind === "cliff-linear" && cmpDec(now, s.cliff) < 0)
