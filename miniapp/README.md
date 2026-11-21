@@ -20,7 +20,13 @@ The module's calls (`module/rust-lib/src/lib.rs`; each answers JSON `{"ok":true,
 | `claim_public(id)`, `claim_private(id, target)` | `Client::claim_public` / `claim_private`. A private target must be a private account the wallet holds (else code 1001), and a claim whose private destination could not pay the simulated fee is not sent. |
 | `cancel(id)`, `make_irrevocable(id)`, `signal_milestone(id, index)`, `transfer_beneficiary(id, to)` | The matching `Client` calls. |
 | `import_schedule(account)` | Gives a schedule account made elsewhere a local id, so its beneficiary sees it. |
-| `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). |
+| `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). The app calls it as the payout box is typed in. |
+| `set_accounts(json)`, `claim_call(id)` | Names Wallet mode: the accounts Names granted, and a public LEZ claim built as a Names `propose_call` (program, accounts, instruction, summary). |
+
+The app talks to Names Wallet directly (`logos.callModuleAsync("names", …)`: `request_access`,
+`granted_accounts`, `account_balances`, `propose_call`, `request_status`) and takes the person to
+Names with Basecamp's navigation intent (`logos.request("basecamp.apps.launch", { app: "names_ui" })`,
+declared in `metadata.json` `uses`); Names brings them back once the request is answered.
 
 The acting account is never chosen by the view: it is the schedule's beneficiary (claim,
 transfer), cancel authority (cancel, make irrevocable) or milestone authority (signal), and the

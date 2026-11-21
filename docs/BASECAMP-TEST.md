@@ -1,117 +1,97 @@
-# Vesting in Basecamp: install and click-through test
+# Vest in Basecamp: install and click-through test
 
-What this checks: the two Basecamp packages load, the app talks to the real module, and the
-module talks to the chain through a LEZ wallet: settings and the chain-id check, the wallet's
-accounts, creating a schedule, the pre-claim summary with the simulated fee, a public claim, the
-private claim's fee check and disclosure, cancel, milestone signal, a batch, LNS names, import.
+What this checks: the two Basecamp packages load, Vest connects to Names Wallet and comes back,
+a public LEZ claim goes through Names Wallet, the payout box looks names up, and (with a wallet
+folder) creating, cancelling, unlocking a milestone and a batch. Every write is a real transaction
+on the public LEZ rc3 demo chain (`https://lez.nameswallet.app/`), with small amounts. Run it on a
+test Basecamp (0.3.x) with nothing else at stake.
 
-Run it on a test Basecamp (0.3.x) with nothing else at stake. Every write below is a real
-transaction on the public LEZ rc3 demo chain (`https://lez.nameswallet.app/`), with small amounts.
+A recorded run (wallet-folder signing, 2026-11-20): `docs/live/basecamp-clickthrough-20261120.md`.
 
 ## 0. What you need
 
-- The two packages built by `miniapp/module/stage.sh` + nix (see `miniapp/README.md`):
-  `vesting-0.3.0.lgx` (the core module) and `vesting_ui-0.3.0.lgx` (the app). Check their sha256
-  against the build's `SHA256SUMS` before installing.
-- A LEZ rc3 wallet folder (`wallet_config.json` + `storage.json`) with two public accounts, `A`
-  (creator) and `B` (beneficiary), and one private account `P`, all on the demo chain. With the
-  `vesting` CLI (built `--features lez`):
+- The two packages built by `miniapp/module/stage.sh` + nix (`miniapp/README.md`):
+  `vesting-<version>.lgx` (the core module) and `vesting_ui-<version>.lgx` (the app). Check their
+  sha256 against the build's `SHA256SUMS`.
+- **Names** installed, opened once, on the **bridge test network** (in Names: Settings, Network),
+  with a public account holding a little LEZ (about 0.01 LEZ pays several fees).
+- For **paying out** until Names Wallet can approve it: a LEZ rc3 wallet folder
+  (`wallet_config.json` + `storage.json`) with a funded public account, made with the `vesting`
+  CLI built `--features lez`:
 
   ```sh
   V="vesting --network https://lez.nameswallet.app/ --wallet <wallet folder>"
-  $V wallet account new public      # A: prints Public/<base58>
-  $V wallet account new public      # B
-  $V wallet account new private     # P: prints Private/<base58>
+  $V wallet account new public      # prints Public/<base58>
   ```
 
-- Native LEZ on `A` (pays the creates and the cancel/signal transactions) and on `B` (pays its
-  public claim's fee): about 0.01 LEZ each is plenty. Send it from a funded wallet with
-  `$V wallet auth-transfer send --from Public/<funded> --to Public/<A or B> --amount 10000000`.
-- Optional: an LNS name registered on the demo chain whose account is `B` (for step 7).
+- A schedule for your Names account to claim: make one with the wallet folder (step 5) or the CLI,
+  with your Names account as the beneficiary and a start date in the past.
 
-Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ). Dates are
-`yyyy-mm-dd` (UTC midnight).
+Amounts in the app are in LEZ; dates are `yyyy-mm-dd` (midnight UTC).
 
 ## 1. Install
 
-1. Basecamp, install from file: `vesting-0.3.0.lgx` first, then `vesting_ui-0.3.0.lgx`.
-2. Open **Vesting**. Expected: no red text; a card "Connect a wallet to start" with **Open
-   settings**. If it instead says the Vesting module isn't installed, the core module didn't
-   load: stop and collect Basecamp's log.
+1. Basecamp, Package Manager, **Install Local Package**: `vesting-<version>.lgx` first, then
+   `vesting_ui-<version>.lgx`.
+2. The sidebar shows Vest's icon (orange, a white **v**). Open **Vest**. Expected: the header
+   "Vest · Pay tokens out over time, or claim what has vested to you · Runs on Bridge test
+   network", then **What do you want to do?** with *Claim tokens sent to me* chosen and five
+   numbered steps; step 1 **Connect Names Wallet** holds a **Connect** button. No red text.
+3. If it says the Vest module isn't installed, the core module didn't load: stop and collect
+   Basecamp's log.
 
-## 2. Settings and the chain check
+## 2. Connect (Names Wallet and back)
 
-1. **Settings** tab. The facts show the built-in network: name "Bridge test network (LEZ rc3
-   demo chain)", RPC `https://lez.nameswallet.app/`, chain id `2da7f7df…5374`, vesting program
-   `2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2`, token program
-   `FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz`, LNS registry
-   `6Yxj5k8AiuBSuMAYVQFGrYKjJGUSSaWWgoB9D9XXN3gA`.
-2. Type the wallet folder (and its password if it is encrypted), **Save and connect**. Expected:
-   the button says "Connecting…", then the status turns green "Connected: Bridge test network …"
-   and Result says "Connected to …".
-3. Negative: type chain id `00…00` (64 zeros) in the overrides, **Save and connect**. Expected: red
-   "Saved, but not connected: https://lez.nameswallet.app/ serves chain 2da7f7df…, not 0000…".
-   Clear the field and **Save and connect** again (green).
+1. Press **Connect**. Expected: Basecamp switches to **Names**, which shows "Vest wants to see
+   your accounts" with your accounts to tick.
+2. Tick your public account, **Approve**. Expected: Basecamp switches back to **Vest** by itself;
+   step 1 has a tick, step 2 is current, and the Receive / Pay out / Settings tabs show.
+3. Negative: Settings, **Disconnect Names Wallet**, then **Connect** and **Reject** in Names.
+   Expected: back in Vest, "You declined the connection in Names Wallet. Nothing was sent." Connect
+   again and approve.
 
-## 3. Creator view: create
+## 3. Receive: a public claim through Names Wallet
 
-1. **Create** tab. The wallet's public accounts are listed with balances; choose `A`.
-2. Cliff + linear is preselected: choose **Linear**. Token `LEZ`. Start date: yesterday. End date:
-   tomorrow + 1 day. Beneficiary: `B`'s base58. Total amount `1000000`.
-3. **Create schedule**. Expected: "Creating…", then Result "Created schedule 0. tx …… in block N".
-   "Schedules you manage" lists `0 · linear · 0.001 LEZ` with **Cancel** and **Make irrevocable**.
-4. Milestone: choose **Milestone**, beneficiary `B`, tranches `300000` and `700000` (+ Add tranche),
-   **Create schedule**. Expected: schedule 1, with **Signal tranche 1** and **Signal tranche 2**.
+1. **Receive**. Your schedules are listed (or "No schedules for your accounts yet": paste the
+   schedule's address under **Add schedule**). Choose one.
+2. The facts: Claimable now, Claimed, Still locked, Next, From. Press **Check claim**. Expected:
+   "Checking…", then **Claim … LEZ?** with To (your account, public) and the fee line.
+3. **Claim in Names Wallet**. Expected: Names opens with the call (the Vest program, its label from
+   the Program Registry, the fee note); approve it. Vest shows "Waiting for you to approve…", then
+   "Claimed … LEZ · tx …" and "What happens next: …"; Claimed goes up.
+4. A schedule with nothing unlocked: **Check claim** says when the next part unlocks; nothing is
+   sent.
 
-## 4. Recipient view: summary, public claim
+## 4. The payout box
 
-1. **Your schedules** tab. Expected: positions `0 · linear · LEZ` and `1 · milestone · LEZ`; choose 0.
-   The facts show the schedule account, beneficiary, total, locked, claimed 0, chain time; "2. Claim"
-   shows "Claimable now: …" above 0 (about a third of it, by the dates).
-2. **Public account** is chosen; "Pays" names `B`. Press **Check claim**. Expected: "Checking the fee…",
-   then the **Claim …** panel: the claimable amount, an **Estimated fee** above 0 (the
-   simulated fee of this very claim), destination `B (public)`, and a green line "Your public
-   account can pay the estimated fee of …". No privacy text.
-3. **Claim …**. Expected: "Claiming…", then Result "Claimed … LEZ to … (public) · tx …
-   in block N"; Claimed in the facts goes up and Claimable drops to (nearly) 0.
-4. Choose position 1 (milestone, nothing signalled) and **Claim**. Expected: no confirmation;
-   Result "Nothing claimable yet. Next unlock: tranche 1 — signalled by the creator."
+**Pay out**, *Who receives it*:
 
-## 5. Private claim: disclosure and fee check (do not confirm)
+- a registered name with an account: `Pays <name> · <address>`;
+- a name nobody registered: "No one holds the LNS name …" (red), and Create stops on it;
+- an address: `Pays the address …`.
 
-1. Position 0, **Private account**. The wallet's private account `P` is listed with its balance;
-   choose it. **Claim**.
-2. Expected: the confirmation shows destination `P (private)`, the privacy disclosure in amber
-   ("Visible on-chain: the claim amount, the beneficiary address, the vesting schedule address.
-   Not traceable: which private account receives the tokens, any later movement of those
-   tokens."), the estimated fee of the private claim, and the fee check: green "The private
-   account (paid from what the claim brings it) can pay …" when the claimable amount covers the
-   fee, or red "… can't pay the estimated fee …" with **Claim …** disabled when it doesn't.
-3. Press **Cancel** (Result: "Claim not sent."). Confirming would prove the claim on this machine
-   (about 10 minutes with a real proof on this chain); only do it on purpose.
+Typing in the amount, milestone and batch boxes goes in whole (each keystroke lands where it was
+typed).
 
-## 6. Creator actions
+## 5. Paying out (wallet folder, for now)
 
-1. **Create** tab, schedule 1: **Signal tranche 1**. Expected: "Signalling…", then "Signalled
-   milestone 1 on 1. Unlocked 0.0003 LEZ." and the button disappears. Signal it again is no
-   longer offered; schedule 1 is now claimable on the Recipient tab (claim it publicly as in 4).
-2. Schedule 0: **Make irrevocable**. Expected: "Made schedule 0 irrevocable."; its row says
-   "irrevocable" and Cancel is gone.
-3. Schedule 1: **Cancel**. Expected: "Cancelled schedule 1. Refunded 0.0007 LEZ to the creator."
-   and the row says CANCELLED. What was vested before the cancel stays claimable by `B`.
+With Names Wallet, **Create** is off and says why above the button. To pay out today: Settings,
+**Advanced: a wallet folder instead of Names Wallet**, give the folder (and its password if it has
+one), **Sign with this wallet folder**.
 
-## 7. Batch, names, import
+1. **Pay out**, **Evenly over time**, start yesterday, fully unlocked in two days, *Who receives it*
+   your Names account, **How much** `0.001`, **Create schedule**. Expected: "Creating…", then
+   "Created schedule N" and what to share with them.
+2. **Milestones**: two milestones `0.0003` and `0.0007`, **Create schedule**. Under *Schedules you
+   manage*: **Unlock milestone 1**; it disappears and that part becomes claimable.
+3. **Cancel schedule** on the milestone schedule: the confirmation says it can't be undone;
+   confirm. Expected: "Cancelled schedule N. … went back to the creator."
+4. **Several people, one transaction**: two rows, **Create 2 schedules**: one transaction.
 
-1. **Create**, **Several people, one transaction**, Linear, dates as in 3, two rows: `B` with
-   `200000`, and (if you have one) `B`'s LNS name with `300000`; **Create 2 schedules**. Expected:
-   Result "<name> resolves to <B's base58>. Created 2 schedules. tx … in block N" (one transaction).
-   A mistyped name fails with "unknown LNS name '…'" and nothing is created.
-2. **Your schedules**, Add a schedule: paste the schedule account of a schedule made elsewhere for `B` (for
-   example by the CLI); **Import**. Expected: "Imported the schedule as N." and it is listed.
-   An account that is not a schedule of this program is refused with a plain error.
+Switch back with Settings, **Use Names Wallet instead**.
 
-## 8. What to send back
+## 6. What to send back
 
-The Result lines and tx hashes of steps 3, 4, 6 and 7, screenshots of the two confirmations (4.2
-and 5.2), and anything red that the steps don't expect. If a call never answers, Basecamp's log
-for the `vesting` module.
+The result lines and tx hashes of steps 3 and 5, a screenshot of the Names approval in 3.3, and
+anything red the steps don't expect. If a call never answers, Basecamp's log for the `vesting`
+module.

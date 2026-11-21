@@ -6,16 +6,18 @@ network. Vest runs in Logos Basecamp and signs through your **Names Wallet**: yo
 accounts Vest may see, and you approve every payment and claim in the Names app. Vest never sees
 a key.
 
-This guide follows the app. The same steps are in the app itself: **Guide**, top right.
+This guide follows the app. The same steps are on Vest's first screen, and one click away under
+**Steps**, top right.
 
 ## Before you start
 
 1. Install **Names** and **Vest** in Basecamp, and open Names once so it has a wallet.
 2. Names Wallet must be on the **bridge test network** (in Names: Settings, Network). Vest says
    so plainly if it is on another one.
-3. Open **Vest**. The first screen has one button: **Connect Names Wallet**. Names asks which
-   accounts Vest may see; tick the ones you use for vesting and approve. You can take this back in
-   Names at any time.
+3. Open **Vest**. The first screen asks **What do you want to do?**: *Claim tokens sent to me*
+   or *Pay someone over time*, then shows the five steps for that. Step 1 is **Connect**: Vest
+   opens Names with the request, you tick the accounts you use for vesting and approve, and Names
+   brings you back to Vest. You can take this back in Names at any time.
 
 Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates are written
 `yyyy-mm-dd` and mean midnight UTC.
@@ -33,8 +35,9 @@ Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates
    was cancelled and what went back; what had unlocked before the cancel is still yours to claim.
 4. **Claim.** Press **Check claim**. Vest shows the amount and where it goes. A public claim pays
    your own account, in the open: anyone can see the amount and where it went.
-5. **Approve it in Names Wallet.** Press **Claim in Names Wallet**; the Names app shows exactly
-   what will be signed, with the network fee. Approve it there. Vest shows "Waiting for you to
+5. **Approve it in Names Wallet.** Press **Claim in Names Wallet**; Vest opens Names, which shows
+   exactly what will be signed, with the network fee. Approve it there; Names brings you back to
+   Vest once the claim is sent. Vest shows "Waiting for you to
    approve the claim in Names Wallet" until you do, then the transaction, and what happens next.
    You can withdraw the request while it waits.
 
@@ -66,6 +69,9 @@ unlock to another account (with a wallet folder, for now).
      to another account. This is fixed when you create it.
    - **More options**: another token; and someone else who may cancel, or who says when a
      milestone is reached (a board, a lawyer). By default that is you.
+   - **Who receives it**: their address or LNS name. Vest looks the name up as you type and
+     shows who it pays (`Pays alice · 2BhK…fGrD`), or says plainly that no one holds that name.
+     Create won't go ahead with a name it can't find.
    - **Several people, one transaction**: one row per person, up to 140.
 3. **Approve it in Names Wallet.**
 4. **Share the schedule's address or your LNS name** with the person receiving, so they can add

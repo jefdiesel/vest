@@ -245,11 +245,13 @@ Details in [`docs/EVENTS.md`](docs/EVENTS.md).
 
 ## Mini-app and viewer
 
-- `miniapp/`: two Basecamp packages, the `vesting` core module and the `vesting_ui` app:
-  recipient and creator views on the wallet's own accounts, the pre-claim summary with the
-  simulated fee, the fee check and the privacy disclosure, batch creation, cancel/signal/transfer,
-  import, LNS names, settings (a LEZ wallet, the built-in network or a network file). Build and
-  module calls: `miniapp/README.md`; install and click-through: `docs/BASECAMP-TEST.md`.
+- `miniapp/`: two Basecamp packages, the `vesting` core module and the `vesting_ui` app. Vest
+  signs through the person's **Names Wallet** (its Provider SDK): it opens Names with each request
+  and Names brings the person back once they answer. The first screen asks what you came to do
+  (claim, or pay out) and walks through five steps; the payout box looks LNS names up as you
+  type. A LEZ wallet folder (Settings, Advanced) still signs creates, cancels and milestones until
+  Names Wallet can approve them. Build and module calls: `miniapp/README.md`; for people:
+  `docs/USER-GUIDE.md`; install and click-through: `docs/BASECAMP-TEST.md`.
 - `web/viewer/`: `cd web/viewer && python3 -m http.server 8099`, then open the page and give a
   schedule account (or a creator and nonce, or an LNS name). Defaults to the public deployment.
 
