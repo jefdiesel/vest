@@ -8,7 +8,7 @@ name: lgx
 
 on:
   push:
-    branches: [linux-lgx]
+    branches: [cleanup, main, linux-lgx]
     paths:
       - 'miniapp/**'
       - 'core/**'
