@@ -156,7 +156,7 @@ check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nam
 // ── Names Wallet ───────────────────────────────────────────────────────────────────
 // The Names Wallet SDK, copied unchanged from the Names repository (sdk/qml/): its own tests are
 // there (sdk/NamesWalletSDK.test.mjs). A new copy changes these hashes on purpose.
-const SDK_FILES = { "NamesWalletSDK.mjs": "69be803a6c8db2ee988183564a20ecf9950920f2b235b6f52ec8201dc59a40ef", "NamesWallet.qml": "6161ab99dca96e6b50290ff84e9fa327c5a26b6d5c03c665c419d8382ccafc65" };
+const SDK_FILES = { "NamesWalletSDK.mjs": "8c99685f365fc12b21d0d0caf907e941902a7e3a86e16b41abe0c23e0c56c993", "NamesWallet.qml": "a8bbe1528c91b2410770279a1d054d35d18d69b8355cc0f3286e7df4cdb1f08e" };
 check("the Names Wallet SDK is version 1.0.0, unchanged", [SDK.VERSION, ...Object.keys(SDK_FILES).map(f => createHash("sha256").update(readFileSync(new URL("./qml/" + f, import.meta.url))).digest("hex"))],
   ["1.0.0", ...Object.values(SDK_FILES)]);
 check("names replies through the SDK: value, busy, refusal, missing, unclear", [
