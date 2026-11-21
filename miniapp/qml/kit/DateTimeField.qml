@@ -1,11 +1,12 @@
 // A date-and-time field: click it for a small panel under the field with a month grid,
 // hours and minutes, and Done / Clear. Uses the shared look and the app's date helpers.
-// Plain QtQuick only; the panel stays inside the page, so a Flickable can scroll it.
+// Plain QtQuick only. Opening it makes the field taller (the panel sits inside it), so the
+// form below moves down instead of being drawn over.
 import QtQuick
 import QtQuick.Layouts
 import "../logic.mjs" as Logic
 
-Rectangle {
+Item {
     id: field
     property Look look: Look {}
     property string hint: ""
@@ -13,13 +14,19 @@ Rectangle {
     property bool open: false
     signal changed()
 
-    implicitHeight: 38
-    radius: 6
-    color: look.slate
-    border.width: 1
-    border.color: open || area.containsMouse ? look.brass : look.line
+    implicitHeight: box.height + (open ? panel.height + 4 : 0)
+    implicitWidth: 0
 
-    Text {
+    Rectangle {
+      id: box
+      anchors { left: parent.left; right: parent.right; top: parent.top }
+      height: 38
+      radius: 6
+      color: look.slate
+      border.width: 1
+      border.color: field.open || area.containsMouse ? look.brass : look.line
+
+      Text {
         anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 12; rightMargin: 12 }
         textFormat: Text.PlainText
         text: field.ms >= 0 ? Logic.dateTimeText(field.ms) : field.hint
@@ -34,6 +41,7 @@ Rectangle {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: field.open ? field.close() : field.show()
+      }
     }
 
     function pad2(n) { return (n < 10 ? "0" : "") + n }
@@ -102,8 +110,10 @@ Rectangle {
         id: panel
         visible: field.open
         z: 10
-        anchors { top: parent.bottom; topMargin: 4; left: parent.left; right: parent.right }
-        implicitHeight: inner.implicitHeight + 24
+        anchors { top: box.bottom; topMargin: 4 }
+        x: 0
+        width: Math.max(field.width, look.px(300))
+        height: inner.implicitHeight + 24
         radius: 8
         color: look.card
         border.width: 1
@@ -146,10 +156,12 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: 2
                 Repeater {
                     model: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
                     Text {
                         Layout.fillWidth: true
+                        Layout.preferredWidth: 1
                         horizontalAlignment: Text.AlignHCenter
                         textFormat: Text.PlainText
                         text: modelData
@@ -171,6 +183,7 @@ Rectangle {
                         required property var modelData
                         readonly property bool picked: modelData.date === panel.picked
                         Layout.fillWidth: true
+                        Layout.preferredWidth: 1
                         Layout.preferredHeight: look.px(26)
                         radius: 4
                         color: picked ? look.brass : (cellArea.containsMouse ? look.raised : "transparent")

@@ -91,8 +91,12 @@ export function partsOf(ms) {
 
 /// The browser's short time-zone name, or "" when it cannot say.
 export function timeZoneName() {
-    var words = String(new Date().toLocaleTimeString("en-US", { timeZoneName: "short" })).split(/\s+/)
-    return words.length > 0 ? words[words.length - 1] : ""
+    // From the clock offset: Basecamp's engine ignores the timeZoneName option (it gave "PM").
+    var off = -new Date().getTimezoneOffset()
+    if (!isFinite(off)) return ""
+    if (off === 0) return "UTC"
+    var h = Math.floor(Math.abs(off) / 60), m = Math.abs(off) % 60
+    return "UTC" + (off < 0 ? "−" : "+") + h + (m ? ":" + (m < 10 ? "0" : "") + m : "")
 }
 
 /// "Sat 21 Nov 2026 · 09:00 (your time, EST)" — "" when there is no moment yet.
@@ -589,7 +593,7 @@ export function payeeLine(typed, r) {
     var t = String(typed == null ? "" : typed).trim()
     if (r && r.ok && r.base58) {
         var addr = short(r.base58)
-        return { ok: true, text: r.name ? "Pays " + clean(r.name) + " · " + addr : "Pays the address " + addr + "." }
+        return { ok: true, base58: r.base58, name: r.name || "", text: r.name ? "Pays " + clean(r.name) + " · " + addr : "Pays the address " + addr + "." }
     }
     var why = String((r && r.error) || "")
     if (/unknown LNS name|not registered|no such name/i.test(why)) return { ok: false, text: "No one holds the LNS name " + clean(t) + ". Check the spelling, or paste their address." }
@@ -757,6 +761,29 @@ export function createSummary(built, typed) {
     var base = String((built && built.summary) || "")
     if (name === "" || accountKind(name) !== "name") return base
     return "Create a Vest schedule: " + ((built && built.amount_display) || "") + " from this account, to " + clean(name) + (built && built.beneficiary_base58 ? " (" + short(built.beneficiary_base58) + ")" : "")
+}
+
+/// The receipt shown after a create: what was made, between whom, on what plan, and the proof.
+/// `r`: {id, amountDisplay, kind, start, cliff, end, cancelable, transferable, fromAddr, fromName,
+/// toAddr, toName, tx, code}. Returns {title, rows: [{key, value, addr?}], share}.
+export function receiptOf(r) {
+    r = r || {}
+    var kinds = { "linear": "Evenly", "cliff-linear": "Cliff, then evenly", "milestone": "Milestones" }
+    var plan = (kinds[r.kind] || "Evenly") + (r.kind === "milestone" ? "" :
+        ", from " + dateTimeText(r.start) + (r.kind === "cliff-linear" && r.cliff > 0 ? ", cliff " + dateTimeText(r.cliff) : "") + " to " + dateTimeText(r.end))
+    var rows = [
+        { key: "Amount", value: r.amountDisplay || "" },
+        { key: "From", value: r.fromName ? clean(r.fromName) : short(r.fromAddr || ""), addr: r.fromAddr || "" },
+        { key: "Receives", value: r.toName ? clean(r.toName) : short(r.toAddr || ""), addr: r.toAddr || "" },
+        { key: "Plan", value: plan },
+        { key: "Rules", value: (r.cancelable ? "You can cancel it" : "Permanent: nobody can cancel it") + " · " + (r.transferable ? "they can hand it on" : "they can't hand it on") },
+        { key: "Transaction", value: r.tx ? short(r.tx) : "sent", addr: r.tx || "" },
+        { key: "Schedule code", value: r.code ? short(r.code) : "", addr: r.code || "" }
+    ]
+    var share = r.fromName
+        ? "Tell them your LNS name, " + clean(r.fromName) + ": in their Vest they open Receive, type it and press Add schedule."
+        : "Send them the schedule code: in their Vest they open Receive, paste it and press Add schedule."
+    return { title: "Schedule " + (r.id !== undefined && r.id !== "" ? r.id + " " : "") + "created", rows: rows, share: share }
 }
 
 /// What a Names write is called in its status line ("the cancel"), from the view's step name.

@@ -200,6 +200,12 @@ check("shortOfFunds: enough, too little, milestones, unknown balance", [
   L.shortOfFunds("1000", "0", ["600", "600"]).startsWith("This schedule needs"), L.shortOfFunds(undefined, "5")], ["", true, true, ""]);
 check("createSummary says the LNS name typed", [L.createSummary({ summary: "S", amount_display: "1 LEZ" }, "jefdiesel"), L.createSummary({ summary: "S" }, "76DoKtAcVM98avrHdPV7PiUgzCz5mAUJWJKdv5Tbj8ub")], ["Create a Vest schedule: 1 LEZ from this account, to jefdiesel", "S"]);
 check("after a create, the payer's LNS name is what to share", L.nextLine("create", { id: 3, name: "jefdiesel" }), "Schedule 3 is live. Tell them your LNS name, jefdiesel: in their Vest they open Receive, type jefdiesel and press Add schedule.");
+{
+  const rc = L.receiptOf({ id: 3, amountDisplay: "1 LEZ", kind: "linear", start: L.atLocal(2026, 10, 21, 9, 0), end: L.atLocal(2026, 10, 22, 9, 0), cancelable: true, transferable: false,
+    fromAddr: "BawxwquWtPEVcrwSFftD6jS3XFxZNv4qYrV8pkyo9mu7", fromName: "jefdiesel", toAddr: "CCVd76Tk3WvFb63Wbuu4exMeLRTbSuMWHqxuvysapKnk", toName: "jef04", tx: "ab".repeat(32), code: "cd".repeat(16) });
+  check("receipt: title, names first, addresses kept, what to share", [rc.title, rc.rows[1].value, rc.rows[1].addr.length, rc.rows[2].value, rc.rows[3].value.startsWith("Evenly, from Sat 21 Nov 2026 · 09:00"), rc.share.startsWith("Tell them your LNS name, jefdiesel")],
+    ["Schedule 3 created", "jefdiesel", 44, "jef04", true, true]);
+}
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);

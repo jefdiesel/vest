@@ -64,6 +64,8 @@ Item {
     property bool busy: false
     property string workingOn: ""
     property bool justCreated: false
+    property var receipt: null                 // the last create's receipt (Logic.receiptOf input)
+    property var shownAddr: ({})               // which receipt rows show their full address
 
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
@@ -190,10 +192,27 @@ Item {
             if (!l.ok) { say(l.error || "Couldn't read your schedules.", true); return }
             schedules = (l.schedules || []).map(Logic.fromModule)
             names = l.names || ({})
+            learnNames()
             if (l.time) effectiveTime = l.time
             if (!findById(recipientSchedules, recipientId))
                 recipientId = recipientSchedules.length ? recipientSchedules[0].id : null
         }, 120000)
+    }
+
+    /// Show LNS names, not addresses: ask the wallet for the confirmed name of every account on
+    /// screen (creators, people receiving, our own accounts) and keep it in the name book.
+    function learnNames() {
+        if (namesState !== "connected") return
+        var seen = {}, list = []
+        var add = function(hex) { var h = String(hex || "").toLowerCase(); if (/^[0-9a-f]{64}$/.test(h) && !seen[h] && !names[h]) { seen[h] = true; list.push(h) } }
+        schedules.forEach(function(sc) { add(sc.creator); add(sc.beneficiary) })
+        accounts.forEach(function(a) { add(a.id) })
+        list.slice(0, 24).forEach(function(h) {
+            wallet.reverse(Logic.base58Of(h), function(rv) {
+                if (!rv || !rv.ok || !rv.name) return
+                var m = Object.assign({}, root.names); m[h] = rv.name; root.names = m
+            })
+        })
     }
 
     function fillSettings(r) {
@@ -433,6 +452,15 @@ Item {
                 var id = imp.ok ? imp.id : ""
                 var payerAcct = findById(publicAccounts, cCreator)
                     var shown = function(nm) {
+                        var toAddr = root.payee && root.payee.account ? root.payee.account : (root.payee && root.payee.base58 ? root.payee.base58 : Logic.base58Of(String(p.beneficiary).replace(/^Public\//, "")))
+                        root.shownAddr = ({})
+                        root.receipt = {
+                            id: id, amountDisplay: built.amount_display, kind: p.kind, start: p.start, cliff: p.cliff, end: p.end,
+                            cancelable: p.cancelable, transferable: p.transferable,
+                            fromAddr: payerAcct ? payerAcct.base58 : "", fromName: nm,
+                            toAddr: toAddr, toName: Logic.accountKind(typed) === "name" ? typed : (root.payee && root.payee.name ? root.payee.name : ""),
+                            tx: v.tx || "", code: built.schedule_address || ""
+                        }
                         say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + "."]).join(" "),
 
                             false, Logic.nextLine("create", { id: id, name: nm }))
@@ -743,6 +771,41 @@ Item {
                 Body { text: Logic.NAMES_CANT_PAY }
             }
 
+            // The receipt of the last create: what was made, between whom, and the proof.
+            Sheet {
+                id: receiptCard
+                visible: root.tab === "pay" && root.receipt !== null
+                readonly property var rc: root.receipt ? Logic.receiptOf(root.receipt) : null
+                Heading { text: receiptCard.rc ? receiptCard.rc.title : "" }
+                Repeater {
+                    model: receiptCard.rc ? receiptCard.rc.rows : []
+                    delegate: RowLayout {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        spacing: 12
+                        Text { textFormat: Text.PlainText; text: modelData.key; color: look.dim; font.family: look.sans; font.pixelSize: look.px(14); Layout.preferredWidth: look.px(120) }
+                        Text {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: root.shownAddr[index] && modelData.addr ? modelData.addr : modelData.value
+                            color: look.ink
+                            font.family: root.shownAddr[index] ? look.mono : look.sans
+                            font.pixelSize: look.px(root.shownAddr[index] ? 13 : 15)
+                            wrapMode: root.shownAddr[index] ? Text.WrapAnywhere : Text.WordWrap
+                        }
+                        Link { look: root.look; visible: !!modelData.addr; text: root.shownAddr[index] ? "Hide" : "Show"; onPressed: { var m = Object.assign({}, root.shownAddr); m[index] = !m[index]; root.shownAddr = m } }
+                        Link { look: root.look; visible: !!modelData.addr; text: "Copy"; onPressed: root.copy(modelData.addr, modelData.key) }
+                    }
+                }
+                Body { color: look.ink; text: receiptCard.rc ? receiptCard.rc.share : "" }
+                RowLayout {
+                    spacing: 20
+                    Action { look: root.look; label: "Done"; onPressed: root.receipt = null }
+                    Link { look: root.look; visible: !!(root.receipt && root.receipt.code); text: "Copy schedule code"; onPressed: root.copy(root.receipt.code, "Schedule code") }
+                }
+            }
+
             Card {
                 visible: root.tab === "pay" && root.connected
                 Heading { text: "New schedule" }
@@ -778,9 +841,9 @@ Item {
                     Label { text: "Starts" }
                     Label { visible: root.cKind === "cliff-linear"; text: "Cliff" }
                     Label { text: "Fully unlocked" }
-                    DateTimeField { id: startField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "Choose a date and time" }
-                    DateTimeField { id: cliffField; look: root.look; Layout.preferredWidth: 1; visible: root.cKind === "cliff-linear"; Layout.fillWidth: true; hint: "Choose a date and time" }
-                    DateTimeField { id: endField; look: root.look; Layout.preferredWidth: 1; Layout.fillWidth: true; hint: "Choose a date and time" }
+                    DateTimeField { id: startField; look: root.look; Layout.preferredWidth: 1; Layout.alignment: Qt.AlignTop; Layout.fillWidth: true; hint: "Pick a date" }
+                    DateTimeField { id: cliffField; look: root.look; Layout.preferredWidth: 1; Layout.alignment: Qt.AlignTop; visible: root.cKind === "cliff-linear"; Layout.fillWidth: true; hint: "Pick a date" }
+                    DateTimeField { id: endField; look: root.look; Layout.preferredWidth: 1; Layout.alignment: Qt.AlignTop; Layout.fillWidth: true; hint: "Pick a date" }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
