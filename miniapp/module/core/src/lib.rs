@@ -14,6 +14,7 @@
 //! message and code. Amounts are decimal strings with a ready `*_display` string next to them.
 
 mod backend;
+pub mod discover;
 pub mod display;
 mod names_backend;
 pub mod network;
@@ -101,6 +102,9 @@ impl ModuleBackend for AppBackend {
     fn schedule_address(&self, id: u64) -> Option<AccountId> {
         each!(self, b => b.schedule_address(id))
     }
+    fn knows(&self, a: &AccountId) -> bool {
+        each!(self, b => b.knows(a))
+    }
 }
 
 /// The signer when the settings name none: Names Wallet in the app; the JSON ledger in tests.
@@ -172,6 +176,11 @@ pub struct Module {
     names_accounts: Vec<WalletAccount>,
     /// Tests: the chain reads of the Names signer go here instead of the network.
     chain_client: Option<RpcClient>,
+    /// Tests: `discover` reads the chain through this client instead of the network.
+    scan_client: Option<std::sync::Arc<RpcClient>>,
+    /// `discover`'s pacing between RPC calls and its wall-time budget per call.
+    scan_gap: std::time::Duration,
+    scan_budget: std::time::Duration,
 }
 
 fn ok(mut value: Value) -> String {
@@ -243,7 +252,21 @@ impl Module {
             caching: true,
             names_accounts: Vec::new(),
             chain_client: None,
+            scan_client: None,
+            scan_gap: discover::GAP,
+            scan_budget: discover::BUDGET,
         }
+    }
+
+    /// Tests: `discover` reads the chain through this client.
+    pub fn set_scan_client(&mut self, client: RpcClient) {
+        self.scan_client = Some(std::sync::Arc::new(client));
+    }
+
+    /// Tests and measurements: `discover`'s gap between RPC calls and its time budget per call.
+    pub fn set_scan_pacing(&mut self, gap: std::time::Duration, budget: std::time::Duration) {
+        self.scan_gap = gap;
+        self.scan_budget = budget;
     }
 
     /// Measurements: turn the module's and the backend's read caches off (`false`) or on.
@@ -299,11 +322,16 @@ impl Module {
             net.rpc = s.rpc.trim().to_string();
             // Another RPC is another chain unless a chain id says otherwise.
             net.chain_id = String::new();
+            // ... and the file's first Vest block is not known for it.
+            net.vesting_floor = None;
         }
         if !s.chain_id.trim().is_empty() {
             net.chain_id = s.chain_id.trim().to_lowercase();
         }
         if let Some(program) = id(&s.program, "program")? {
+            if net.program != Some(program) {
+                net.vesting_floor = None;
+            }
             net.program = Some(program);
         }
         if let Some(program) = id(&s.token_program, "token_program")? {
@@ -1208,7 +1236,254 @@ impl Module {
             })))
         })
     }
+
+    // ── Finding schedules on the chain (see discover.rs) ────────────────────────────────
+
+    /// Read at most `max_blocks` blocks after the last one read (default 2000), paced, and
+    /// import every schedule whose current beneficiary (or creator) is one of the wallet's
+    /// accounts. `{chain_id, from_block, to_block, tip, done, found, new, incoming, known,
+    /// pending}`: `found` are the schedule addresses (base58) paying you that this call added,
+    /// `new` the same with their creator (hex, as `list()` writes accounts), `incoming` how many
+    /// known schedules pay one of the wallet's accounts now. The app calls again until `done`.
+    pub fn discover(&mut self, max_blocks: &str) -> String {
+        let max = match discover::parse_max_blocks(max_blocks) {
+            Ok(max) => max,
+            Err(error) => return fail(error),
+        };
+        answer(|| {
+            let mine: Vec<AccountId> = self.wallet_accounts()?.iter().map(|a| a.id).collect();
+            let net = self.effective_network()?;
+            let program = net
+                .program
+                .ok_or("this network names no vesting program: set one in Settings")?;
+            let client = match &self.scan_client {
+                Some(client) => client.clone(),
+                None => std::sync::Arc::new(names::http_client(&self.rpc_url(&net.rpc)?)),
+            };
+            let started = std::time::Instant::now();
+            let budget = self.scan_budget;
+            let mut pace = discover::Pacer::new(self.scan_gap);
+            let served = match pace.call(&client, "getChannelId", json!([]))? {
+                Value::String(id) => id.trim_start_matches("0x").to_lowercase(),
+                other => return Err(format!("getChannelId: unexpected answer {other}")),
+            };
+            if !net.chain_id.is_empty() && served != net.chain_id {
+                return Err(format!(
+                    "{} serves chain {served}, not {}: check the RPC and the network",
+                    net.rpc, net.chain_id
+                ));
+            }
+            let floor = net.vesting_floor.unwrap_or(0);
+            let mut state = match discover::ScanState::load(&self.dir) {
+                Some(saved) if saved.chain_id == served && saved.program == b58(&program) => saved,
+                // Another chain (a reset) or another program: start over.
+                _ => discover::ScanState::fresh(&served, &program, floor),
+            };
+            let tip = pace
+                .call(&client, "getLastBlockId", json!([]))?
+                .as_u64()
+                .ok_or("getLastBlockId: expected a block number")?;
+            state.tip = tip;
+            let from_block = state.next_block();
+            let out_of_time = |started: &std::time::Instant| started.elapsed() >= budget;
+            let mut error = None;
+            let mut read = 0u64;
+
+            // Views first (left over from a call that stopped), then block ranges, each range's
+            // views read before the next range; the state is saved after each step.
+            'scan: loop {
+                while let Some(account) = state.pending.first().cloned() {
+                    if out_of_time(&started) {
+                        break 'scan;
+                    }
+                    let Some(id) = discover::parse_b58(&account) else {
+                        state.pending.remove(0);
+                        continue;
+                    };
+                    pace.wait();
+                    let view = discover::read_state(&client, &id, &program);
+                    pace.mark();
+                    match view {
+                        Ok(found) => {
+                            let block = state.touched.get(&account).and_then(|t| t.last()).map_or(0, |t| t.0);
+                            match found.as_ref().and_then(|s| discover::known_of(s, block)) {
+                                Some(known) => {
+                                    state.schedules.insert(account.clone(), known);
+                                }
+                                // Being created (no schedule yet): read again when touched again.
+                                None if found.is_some() => {}
+                                None => {
+                                    state.schedules.remove(&account);
+                                }
+                            }
+                            state.pending.remove(0);
+                        }
+                        Err(e) => {
+                            error = Some(e);
+                            break 'scan;
+                        }
+                    }
+                }
+                state.save(&self.dir)?;
+                let next = state.next_block();
+                if next > tip || read >= max || out_of_time(&started) {
+                    break;
+                }
+                let end = (next + RANGE_LEN - 1).min(tip).min(next + (max - read) - 1);
+                let blocks = match pace
+                    .call(&client, "getBlockRange", json!([next, end]))
+                    .and_then(|answer| discover::decode_blocks(&answer))
+                {
+                    Ok(blocks) => blocks,
+                    Err(e) => {
+                        error = Some(e);
+                        break;
+                    }
+                };
+                for block in &blocks {
+                    let id = block.header.block_id;
+                    if id < next || id > end {
+                        error = Some(format!("getBlockRange [{next}, {end}] answered block {id}"));
+                        break 'scan;
+                    }
+                    for (account, tx) in discover::vest_accounts(block, &program) {
+                        state.touch(&b58(&account), id, &tx);
+                    }
+                }
+                read += end - next + 1;
+                state.last_block = Some(end);
+                state.save(&self.dir)?;
+            }
+            state.save(&self.dir)?;
+
+            // Every known schedule against the accounts of now: one shared since, or one that
+            // moved to you, is imported even when no new block mentions it.
+            let mut found = Vec::new();
+            let mut new_rows = Vec::new();
+            let mut incoming = 0;
+            let candidates: Vec<(String, Schedule)> = state
+                .schedules
+                .iter()
+                .filter_map(|(a, k)| k.decoded().map(|s| (a.clone(), s)))
+                .collect();
+            for (address, schedule) in candidates {
+                let pays_me = mine.contains(&schedule.beneficiary);
+                if pays_me {
+                    incoming += 1;
+                }
+                let roles = pays_me
+                    || mine.contains(&schedule.creator)
+                    || mine.contains(&schedule.cancel_authority)
+                    || mine.contains(&schedule.milestone_authority);
+                let Some(account) = discover::parse_b58(&address) else { continue };
+                if !roles || state.imported.contains(&address) {
+                    continue;
+                }
+                let backend = self.client()?.backend_mut();
+                if backend.knows(&account) {
+                    state.imported.insert(address);
+                    continue;
+                }
+                match backend.import_account(account) {
+                    Ok(id) => {
+                        if pays_me {
+                            found.push(json!(address));
+                            new_rows.push(json!({
+                                "id": id, "address": hex::encode(account), "address_base58": address,
+                                "creator": hex::encode(schedule.creator),
+                            }));
+                        }
+                        state.imported.insert(address);
+                    }
+                    Err(e) => {
+                        error.get_or_insert(e);
+                    }
+                }
+            }
+            state.save(&self.dir)?;
+            if !found.is_empty() {
+                self.forget_reads();
+            }
+            if let Some(error) = error {
+                let mut failed: Value = serde_json::from_str(&fail(error)).unwrap_or_default();
+                failed["to_block"] = json!(state.last_block);
+                failed["tip"] = json!(tip);
+                failed["found"] = json!(found);
+                return Ok(failed.to_string());
+            }
+            let to_block = state.last_block;
+            Ok(ok(json!({
+                "chain_id": served,
+                "from_block": from_block,
+                "to_block": to_block,
+                "tip": tip,
+                "done": state.pending.is_empty() && state.next_block() > tip,
+                "found": found,
+                "new": new_rows,
+                "incoming": incoming,
+                "known": state.schedules.len(),
+                "pending": state.pending.len(),
+                "floor": state.floor,
+            })))
+        })
+    }
+
+    /// For another app (Names Wallet): the known schedules paying any of `accounts_json` (a JSON
+    /// array of account ids, base58 or hex), from the scan state only (no new scanning):
+    /// `{to_block, tip, time, schedules: [{address, creator, beneficiary, total_display,
+    /// claimed_display, claimable_display, next_unlock_ms, status, ...}]}`, status `unvested`,
+    /// `claimable` or `closed`. Times use this computer's clock (no network read).
+    pub fn incoming(&mut self, accounts_json: &str) -> String {
+        answer(|| {
+            let rows: Vec<Value> = serde_json::from_str(accounts_json)
+                .map_err(|e| format!("accounts must be a JSON array of account ids: {e}"))?;
+            let mut wanted = Vec::new();
+            for row in rows {
+                let text = row.as_str().unwrap_or("");
+                wanted.push(
+                    names::parse_address(text)
+                        .ok_or_else(|| format!("'{text}' is not an account (base58 or hex)"))?,
+                );
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let net = self.effective_network()?;
+            let state = discover::ScanState::load(&self.dir).filter(|s| {
+                net.program.map(|p| b58(&p)) == Some(s.program.clone())
+                    && (net.chain_id.is_empty() || net.chain_id == s.chain_id)
+            });
+            let Some(state) = state else {
+                return Ok(ok(json!({
+                    "to_block": Value::Null, "tip": Value::Null, "time": now, "schedules": [],
+                })));
+            };
+            let mut schedules = Vec::new();
+            for (address, known) in &state.schedules {
+                let (Some(account), Some(schedule)) = (discover::parse_b58(address), known.decoded())
+                else {
+                    continue;
+                };
+                if wanted.contains(&schedule.beneficiary) {
+                    if let Some(row) = discover::incoming_row(&account, known, now) {
+                        schedules.push(row);
+                    }
+                }
+            }
+            Ok(ok(json!({
+                "chain_id": state.chain_id, "to_block": state.last_block, "tip": state.tip,
+                "time": now, "schedules": schedules,
+            })))
+        })
+    }
 }
+
+/// Blocks per `getBlockRange` of a scan.
+const RANGE_LEN: u64 = discover::RANGE;
+
 
 #[cfg(all(test, not(feature = "lez")))]
 mod tests;
+#[cfg(all(test, not(feature = "lez")))]
+mod tests_discover;

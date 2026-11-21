@@ -147,5 +147,8 @@ pub fn schedule_json(id: ScheduleId, s: &Schedule, now: Timestamp) -> Value {
         "refund_display": s.cancelled.as_ref().map(|c| display::amount(s.total.saturating_sub(c.vested_at_cancel))),
         "last_time": s.last_time,
         "version": s.version,
+        // The first time after `now` at which more becomes claimable (ms), or null: none on a
+        // clock (milestones, cancelled, everything vested).
+        "next_unlock": s.next_unlock_after(now),
     })
 }

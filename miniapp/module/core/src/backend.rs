@@ -26,6 +26,10 @@ pub trait ModuleBackend: Backend {
     fn import_account(&mut self, account: AccountId) -> Result<ScheduleId, String>;
     /// The on-chain account of a schedule id, when there is one.
     fn schedule_address(&self, id: ScheduleId) -> Option<AccountId>;
+    /// Whether schedule account `account` already has a local id (`false` when unknown).
+    fn knows(&self, _account: &AccountId) -> bool {
+        false
+    }
 }
 
 #[cfg(feature = "lez")]

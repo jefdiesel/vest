@@ -62,6 +62,15 @@ pub trait VestingModule: Send + 'static {
     /// The `propose_call` arguments that move schedule `id` to `new_beneficiary`.
     fn transfer_call(&mut self, id: String, new_beneficiary: String) -> String;
 
+    /// Find schedules on the chain by reading at most `max_blocks` blocks (empty: 2000) after
+    /// the last one read, paced; imports those paying the wallet's accounts. Call again until
+    /// `done`. `{chain_id, from_block, to_block, tip, done, found, new, incoming, ...}`.
+    fn discover(&mut self, max_blocks: String) -> String;
+    /// For another app: the known schedules paying any of `accounts_json` (a JSON array of
+    /// account ids, base58 or hex), from the scan state only, each with its status
+    /// (`unvested`, `claimable` or `closed`).
+    fn incoming(&mut self, accounts_json: String) -> String;
+
     /// The host's context: the persistence folder for settings and the id map.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
 }
@@ -195,6 +204,12 @@ impl VestingModule for Vesting {
             Ok(id) => self.m().transfer_call(id, &new_beneficiary),
             Err(error) => bad_input(error),
         }
+    }
+    fn discover(&mut self, max_blocks: String) -> String {
+        self.m().discover(&max_blocks)
+    }
+    fn incoming(&mut self, accounts_json: String) -> String {
+        self.m().incoming(&accounts_json)
     }
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {
         let dir = std::path::PathBuf::from(&ctx.instance_persistence_path);

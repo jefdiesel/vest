@@ -19,7 +19,8 @@
       "id": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2",
       "image_id": "2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6",
       "label": "Vest (RFP-017), updatable",
-      "source": "github.com/jefdiesel/vest"
+      "source": "github.com/jefdiesel/vest",
+      "floor_block": 38700
     },
     "token": {
       "id": "FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz",

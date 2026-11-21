@@ -24,6 +24,9 @@ pub struct Network {
     pub program: Option<AccountId>,
     pub token_program: Option<AccountId>,
     pub lns_registry: Option<AccountId>,
+    /// No Vest transaction before this block (`programs.vesting.floor_block`): where `discover`
+    /// starts reading. Only for the file's own chain and program; `None` reads from block 0.
+    pub vesting_floor: Option<u64>,
     /// "built-in" or the file it came from.
     pub source: String,
 }
@@ -83,6 +86,9 @@ pub fn parse(text: &str, source: &str) -> Result<Network, String> {
         program: program(&file, "vesting")?,
         token_program: program(&file, "token")?,
         lns_registry,
+        vesting_floor: file
+            .pointer("/programs/vesting/floor_block")
+            .and_then(Value::as_u64),
         source: source.to_string(),
     })
 }
@@ -134,6 +140,9 @@ mod tests {
             "d3116a21a92edc916e96a757c8cb4712018d9be7456e4f2e9bdefcac51661ea5"
         );
         assert!(net.lns_registry.is_some());
+        // The site's FLOOR_BLOCK (nameswallet-site site/vest/network.js): the program's first
+        // transaction is in block 38738.
+        assert_eq!(net.vesting_floor, Some(38700));
     }
 
     #[test]
@@ -144,6 +153,7 @@ mod tests {
         assert_eq!(net.chain_id, "ab");
         assert!(net.lns_registry.is_some());
         assert_eq!(net.program, None);
+        assert_eq!(net.vesting_floor, None);
         let other_line = r#"{"format":"names-network/2","lez":"0.5"}"#;
         assert!(parse(other_line, "x").unwrap_err().contains("0.4 only"));
         let other_wire = r#"{"format":"names-network/1","lez":"0.4","lez_release":{"wire":"0.4"}}"#;
