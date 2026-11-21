@@ -83,8 +83,9 @@ loads: it lists every undefined symbol nothing provides (the plugin links with
 `-undefined dynamic_lookup`, so a missing library only shows at load) and dlopens it.
 
 `tools/render.py` renders `qml/Main.qml` offscreen at 1250x700 with a stand-in vesting module,
-wallet and package list (26 scenarios: first run, connecting, Names missing or on another
-network, no wallet installed, two wallets to choose from and the choice in Settings, the guides,
+wallet and package list (27 scenarios: first run, connecting, Names missing or on another
+network, no wallet installed, a wallet that speaks another SDK version, two wallets to choose
+  from and the choice in Settings, the guides,
 no schedules, a schedule, a claim waiting in Names and its result, create, the payout box's
 lookup of an address and of a name through Names, the cancel confirmation, settings, an old
 wallet-folder setting) and fails on any QML error.

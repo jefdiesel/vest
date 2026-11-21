@@ -119,6 +119,7 @@ SCENARIOS = {
     "old-wallet-folder-setting": ({"settings": OLD_WALLET}, WALLET_ON, ""),
     "no-wallet": ({"settings": FIRST}, {"__packages": [{"name": "vesting", "type": "core", "category": "finance"}]}, ""),
     "choose-wallet": ({"settings": FIRST}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]), ""),
+    "unsupported-wallet": ({"settings": FIRST}, {"get_config": {"zone": CONFIG["zone"], "features": []}, "__packages": [{"name": "oldwallet", "type": "core", "category": "wallet", "displayName": "Old Wallet"}]}, ""),
     "chose-other-wallet": ({"settings": DONE_GUIDE}, dict(WALLET_ON, __packages=[NAMES_ROW, {"name": "xwallet", "type": "core", "category": "wallet", "displayName": "X Wallet"}]),
                            "wallet.chooseWallet('xwallet'); root.tab = 'settings'"),
 }
@@ -135,9 +136,10 @@ BRIDGE = r"""
             var na = %(names)s
             if (module === "package_manager")
                 return na.__packages ? JSON.stringify(na.__packages) : ""
-            if (module === "names" || module === "xwallet") {
+            if (module === "names" || module === "xwallet" || module === "oldwallet") {
                 if (na.__missing) return "Module not connected: " + module
                 var v = na[method]
+                if (module === "xwallet" && method === "get_config" && v) v = Object.assign({}, v, { wallet_sdk: { name: "names-wallet", version: "1.0", app: "xwallet_ui" } })
                 return JSON.stringify(JSON.stringify(v === undefined ? { success: false, value: null, error: "not in this scenario" } : { success: true, value: v, error: null }))
             }
             if (module !== "vesting") return ""
@@ -169,7 +171,11 @@ def main():
         out = os.path.join(out_dir, name + ".png")
         bridge = BRIDGE % {"answers": json.dumps(answers), "names": json.dumps(names), "scenario": script or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
         with tempfile.NamedTemporaryFile("w", suffix=".qml", delete=False, dir=os.path.join(HERE, "..", "qml")) as handle:
-            handle.write(source.replace(marker, marker + bridge, 1))
+            # The wallet a scenario chose is kept (QtQuick.LocalStorage) under the app's name: a
+            # name of its own per run, so it never leaks into the next scenario or run.
+            own = source.replace('app: "vesting_ui"', 'app: "render-%s-%d"' % (name, os.getpid()), 1)
+            assert own != source, "Main.qml no longer names its app for the wallet"
+            handle.write(own.replace(marker, marker + bridge, 1))
         try:
             result = subprocess.run([qml, handle.name], capture_output=True, text=True, timeout=60)
         except subprocess.TimeoutExpired:

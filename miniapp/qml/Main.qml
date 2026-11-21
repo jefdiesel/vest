@@ -482,7 +482,7 @@ Item {
 
             // ── The wallet: none, several, not running, another network, asking ──────
             Card {
-                visible: (root.namesState === "missing" || root.namesState === "none") && root.tab !== "settings"
+                visible: ["missing", "none", "unsupported"].indexOf(root.namesState) >= 0 && root.tab !== "settings"
                 Heading { text: "Vest needs Names Wallet" }
                 Body { text: root.namesProblem }
                 Action { look: root.look; label: "Check again"; onPressed: root.refresh() }
@@ -513,7 +513,7 @@ Item {
             // The first screen: pick what you came to do, then numbered steps. The step you are
             // on says what to do and holds its button (step 1: connect Names Wallet).
             Card {
-                visible: root.showGuide && ["missing", "none", "choose", "otherZone"].indexOf(root.namesState) < 0
+                visible: root.showGuide && ["missing", "none", "choose", "unsupported", "otherZone"].indexOf(root.namesState) < 0
                 Heading { text: "What do you want to do?" }
                 RowLayout {
                     spacing: 8
