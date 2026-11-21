@@ -22,6 +22,7 @@ The module's calls (`module/rust-lib/src/lib.rs`; each answers JSON `{"ok":true,
 | `import_schedule(account)` | Gives a schedule account made elsewhere a local id, so its beneficiary sees it. |
 | `resolve_name(name)` | An LNS name through the network's LNS registry (as the CLI resolves it). The app calls it as the payout box is typed in. |
 | `set_accounts(json)`, `claim_call(id)` | Names Wallet mode: the accounts Names granted, and a public LEZ claim built as a Names `propose_call` (program, accounts, instruction, summary). |
+| `create_call(params)`, `cancel_call(id)`, `irrevocable_call(id)`, `signal_call(id, index)`, `transfer_call(id, new_beneficiary)` | Names Wallet 0.18+ mode: the same change built as a Names `propose_call` (`{program, accounts_json, instruction_hex, summary, caller}`); the person approves it in Names, choosing `caller`. |
 
 The app talks to Names Wallet directly (`logos.callModuleAsync("names", …)`: `request_access`,
 `granted_accounts`, `account_balances`, `propose_call`, `request_status`) and takes the person to
