@@ -649,7 +649,9 @@ export function namesReply(raw) {
     if (raw === undefined || raw === null || String(raw) === "") return { ok: false, busy: true, error: "No answer from Names Wallet yet." }
     if (/not connected|not reachable|no such|unknown (module|method)|method not found|not found|not loaded|not installed|call refused/i.test(said || ""))
         return { ok: false, missing: true, error: NAMES_MISSING }
-    return { ok: false, error: "Names Wallet answered something Vest can't read." }
+    // An answer that isn't the Provider SDK's shape: Names is usually being reloaded (a new
+    // version just installed). Retried like busy; said plainly if it lasts.
+    return { ok: false, busy: true, error: "Names Wallet isn't answering normally (it may be restarting). Try again in a moment." }
 }
 
 
