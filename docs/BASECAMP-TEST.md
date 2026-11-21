@@ -11,7 +11,7 @@ transaction on the public LEZ rc3 demo chain (`https://lez.nameswallet.app/`), w
 ## 0. What you need
 
 - The two packages built by `miniapp/module/stage.sh` + nix (see `miniapp/README.md`):
-  `vesting-0.2.2.lgx` (the core module) and `vesting_ui-0.2.3.lgx` (the app). Check their sha256
+  `vesting-0.3.0.lgx` (the core module) and `vesting_ui-0.3.0.lgx` (the app). Check their sha256
   against the build's `SHA256SUMS` before installing.
 - A LEZ rc3 wallet folder (`wallet_config.json` + `storage.json`) with two public accounts, `A`
   (creator) and `B` (beneficiary), and one private account `P`, all on the demo chain. With the
@@ -34,7 +34,7 @@ Amounts in the app are in the smallest unit (9 decimals: `1000000` is 0.001 LEZ)
 
 ## 1. Install
 
-1. Basecamp, install from file: `vesting-0.2.2.lgx` first, then `vesting_ui-0.2.3.lgx`.
+1. Basecamp, install from file: `vesting-0.3.0.lgx` first, then `vesting_ui-0.3.0.lgx`.
 2. Open **Vesting**. Expected: no red text; a card "Connect a wallet to start" with **Open
    settings**. If it instead says the Vesting module isn't installed, the core module didn't
    load: stop and collect Basecamp's log.
