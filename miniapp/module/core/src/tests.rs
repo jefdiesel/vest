@@ -396,3 +396,155 @@ fn an_error_with_html_in_it_never_reaches_the_app() {
     assert!(!answer.to_string().contains("<html"));
     assert!(answer["error"].as_str().unwrap().contains("can't read"));
 }
+
+// ── Names Wallet as the signer ──────────────────────────────────────────────────────
+
+/// A schedule account's state as the Vest program keeps it, in the RPC's answer.
+fn schedule_answer(
+    program: &[u8; 32],
+    schedule: &vesting_core::Schedule,
+    asset: vesting_program::Asset,
+) -> Value {
+    let state = vesting_program::ScheduleState {
+        version: 1,
+        nonce: [9; 32],
+        asset,
+        schedule: Some(schedule.clone()),
+        float: 0,
+        per_claim: 0,
+        pending: None,
+    };
+    let bytes = borsh::to_vec(&state).unwrap();
+    json!({ "data": { "actor_states": { names::base58(program): bytes } } })
+}
+
+fn clock_answer(timestamp: u64) -> Value {
+    let program = vesting_program::clock::clock_account_id().into_value();
+    json!({ "data": { "actor_states": { names::base58(&program): borsh::to_vec(&(7u64, timestamp)).unwrap() } } })
+}
+
+/// A module that signs with Names Wallet, reading a scripted chain; schedule account S pays B.
+fn names_module(rpc: Arc<MockRpc>) -> Module {
+    let mut module = fresh(0, 9);
+    module.set_chain_client(RpcClient::new(rpc));
+    let answer =
+        parse(module.configure(r#"{"signer":"names","rpc":"http://127.0.0.1:9","chain_id":""}"#));
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert_eq!(answer["signer"], "names");
+    module
+}
+
+fn linear_schedule() -> vesting_core::Schedule {
+    let params = vesting_core::CreateParams::linear([1; 32], [2; 32], [0; 32], 1_000, 0, 1_000);
+    vesting_core::create(params, 0).unwrap().0
+}
+
+#[test]
+fn names_wallet_claims_with_a_program_call_it_can_carry() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc.clone());
+    let program = module.effective_network().unwrap().program.unwrap();
+    let schedule = linear_schedule();
+    let s = [0x44u8; 32];
+    // Import (one read), a refused claim (one), then the claim: the schedule, the state again
+    // and the clock.
+    for _ in 0..4 {
+        rpc.push_ok(
+            "getAccountView",
+            schedule_answer(&program, &schedule, vesting_program::Asset::Native),
+        );
+    }
+    rpc.push_ok("getAccountView", clock_answer(400));
+    let imported = parse(module.import_schedule(&hex::encode(s)));
+    assert_eq!(imported["ok"], true, "{imported}");
+    // Not yet connected in Names: the beneficiary's account isn't one Vest was given.
+    let refused = parse(module.claim_call(0));
+    assert!(
+        refused["error"].as_str().unwrap().contains("hasn't shared"),
+        "{refused}"
+    );
+    parse(module.set_accounts(&json!([{ "account": format!("Public/{}", names::base58(&[2; 32])), "account_kind": "public", "balance": "5" }]).to_string()));
+    let call = parse(module.claim_call(0));
+    assert_eq!(call["ok"], true, "{call}");
+    assert_eq!(call["program"], names::base58(&program));
+    assert_eq!(call["amount"], "400");
+    assert_eq!(
+        call["caller"],
+        format!("Public/{}", names::base58(&[2; 32]))
+    );
+    // The message is the program's ClaimAsOf at the network's time, to the beneficiary itself.
+    let expected = vesting_program::Instruction::ClaimAsOf {
+        schedule: lee_core::account::AccountId::new(s),
+        to: lee_core::account::AccountId::new([2; 32]),
+        to_private: false,
+        as_of: 400,
+    };
+    assert_eq!(
+        call["instruction_hex"],
+        hex::encode(borsh::to_vec(&expected).unwrap())
+    );
+    // The accounts Names Wallet's propose_call takes: the schedule's data, its LEZ, the signer's LEZ.
+    let accounts: Value = serde_json::from_str(call["accounts_json"].as_str().unwrap()).unwrap();
+    let sb = names::base58(&s);
+    assert_eq!(
+        accounts,
+        json!([sb, { "account": sb, "balance": true }, { "account": "signer", "balance": true }])
+    );
+    // The list says the schedule is the wallet's to claim.
+    rpc.push_ok("getAccountView", clock_answer(400));
+    rpc.push_ok(
+        "getAccountView",
+        schedule_answer(&program, &schedule, vesting_program::Asset::Native),
+    );
+    let listed = parse(module.list());
+    assert_eq!(
+        listed["schedules"][0]["mine"]["beneficiary"], true,
+        "{listed}"
+    );
+}
+
+#[test]
+fn names_wallet_refuses_what_it_cant_sign_in_plain_words() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc.clone());
+    for write in [
+        module.create(&create_row("10", linear(0, 10))),
+        module.cancel(0),
+        module.make_irrevocable(0),
+        module.signal_milestone(0, 0),
+        module.transfer_beneficiary(0, &hex_id(4)),
+    ] {
+        let answer = parse(write);
+        assert_eq!(answer["ok"], false);
+        assert!(
+            answer["error"]
+                .as_str()
+                .unwrap()
+                .contains("Names Wallet can't sign this for Vest yet"),
+            "{answer}"
+        );
+    }
+    // A token schedule can't be claimed through Names yet either.
+    let program = module.effective_network().unwrap().program.unwrap();
+    let token = vesting_program::Asset::Token {
+        program: lee_core::account::AccountId::new([5; 32]),
+        definition: lee_core::account::AccountId::new([6; 32]),
+    };
+    for _ in 0..3 {
+        rpc.push_ok(
+            "getAccountView",
+            schedule_answer(&program, &linear_schedule(), token),
+        );
+    }
+    parse(module.import_schedule(&hex_id(0x45)));
+    parse(module.set_accounts(
+        &json!([{ "account": format!("Public/{}", names::base58(&[2; 32])) }]).to_string(),
+    ));
+    let answer = parse(module.claim_call(0));
+    assert!(
+        answer["error"].as_str().unwrap().contains("token schedule"),
+        "{answer}"
+    );
+}

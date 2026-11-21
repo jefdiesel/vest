@@ -68,23 +68,51 @@ CANCELLED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
 CLAIMED = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
     schedule(0, {"type": "linear", "start": NOW - 9 * DAY, "end": NOW - DAY}, "1000000", "1000000", "0",
              {"beneficiary": True, "creator": True, "cancel_authority": True, "milestone_authority": True})]}
-FIRST = dict(SETTINGS, connected=False, status="not opened yet", settings=dict(SETTINGS["settings"], wallet_dir=""))
-WRONG = dict(SETTINGS, connected=False, status="no wallet at ~/lez-wallet")
+WALLET = dict(SETTINGS, signer="wallet")
+FIRST = dict(SETTINGS, connected=False, status="not opened yet", signer="names")
+WRONG = dict(SETTINGS, connected=False, signer="wallet", status="no wallet at ~/lez-wallet")
+NAMES_SETTINGS = dict(SETTINGS, signer="names")
+CHAIN = SETTINGS["network"]["chain_id"]
+CONFIG = {"zone": {"id": "home", "channel": CHAIN, "home": True}, "features": ["request_access_with"]}
+GRANTED = {"connected": True, "accounts": [{"account": "Public/2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD", "account_kind": "public"}]}
+NOT_GRANTED = {"connected": False, "accounts": []}
+CLAIM_CALL = {"ok": True, "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "accounts_json": "[]", "instruction_hex": "05",
+              "amount": "31333", "amount_display": lez("31333"), "summary": "Claim", "caller": "Public/2BhK"}
 
+# Each scenario: (vesting answers, names answers, script). Names answers are values (wrapped
+# in the Provider SDK's envelope by the bridge).
 SCENARIOS = {
-    "first-run": ({"settings": FIRST}, ""),
-    "recipient-empty": ({"list": {"ok": True, "time": NOW, "names": {}, "schedules": []}}, ""),
-    "recipient": ({}, ""),
-    "recipient-cancelled": ({"list": CANCELLED}, ""),
-    "recipient-claimed": ({"list": CLAIMED}, ""),
-    "confirm-public": ({"pre_claim_summary": summary(True, "caller", False)}, "root.beginClaim()"),
-    "confirm-private": ({"pre_claim_summary": summary(True, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
-    "confirm-private-short": ({"pre_claim_summary": summary(False, "claim_target", True)}, "root.chooseKind('private'); root.beginClaim()"),
-    "creator": ({}, "root.tab = 'creator'"),
-    "confirm-cancel": ({}, "root.tab = 'creator'; root.askGrave('cancel', root.mySchedules[0])"),
-    "settings": ({}, "root.tab = 'settings'"),
-    "not-connected": ({"settings": WRONG}, ""),
-    "no-module": ({"__missing": True}, ""),
+    "first-run": ({"settings": FIRST}, {"get_config": CONFIG, "granted_accounts": NOT_GRANTED}, ""),
+    "connect-pending": ({"settings": FIRST}, {"get_config": CONFIG, "granted_accounts": NOT_GRANTED,
+                        "request_access": {"request": "ab" * 16, "kind": "connect", "state": "pending"}}, "root.connectNames()"),
+    "names-missing": ({"settings": FIRST}, {"__missing": True}, ""),
+    "other-zone": ({"settings": FIRST}, {"get_config": {"zone": {"id": "home", "channel": "01" * 32, "home": True}}}, ""),
+    "guide-receive": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, ""),
+    "guide-pay": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.guideRole = 'pay'"),
+    "recipient-empty": ({"settings": NAMES_SETTINGS, "list": {"ok": True, "time": NOW, "names": {}, "schedules": []}},
+                        {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.guideOpen = false; root.finishGuide()"),
+    "recipient": ({"settings": dict(NAMES_SETTINGS, settings=dict(SETTINGS["settings"], guide_done=["2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"]))},
+                  {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, ""),
+    "claim-confirm": ({"settings": dict(NAMES_SETTINGS, settings=dict(SETTINGS["settings"], guide_done=["2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"])), "claim_call": CLAIM_CALL},
+                      {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.beginClaim(); scroll.start()"),
+    "claim-approval-pending": ({"settings": dict(NAMES_SETTINGS, settings=dict(SETTINGS["settings"], guide_done=["2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"])), "claim_call": CLAIM_CALL},
+                               {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": [],
+                                "propose_call": {"request": "cd" * 16, "kind": "call", "state": "pending"},
+                                "request_status": {"request": "cd" * 16, "kind": "call", "state": "pending"}},
+                               "root.beginClaim(); later.start(); scroll.start()"),
+    "claim-result": ({"settings": dict(NAMES_SETTINGS, settings=dict(SETTINGS["settings"], guide_done=["2BhKj8RUHy3bhKXGrxpYy1sZgVNXfcG3kGSbZ1EZfGrD"])), "claim_call": CLAIM_CALL},
+                     {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": [],
+                      "propose_call": {"request": "cd" * 16, "kind": "call", "state": "pending"},
+                      "request_status": {"request": "cd" * 16, "kind": "call", "state": "done", "tx": "c5d782913d8819b009c8d15815697b20a59b71f2568d2cd976165af267b7b8fd"}},
+                     "root.beginClaim(); later.start(); scroll.start()"),
+    "recipient-cancelled": ({"settings": WALLET, "list": CANCELLED}, {}, "root.guideOpen = false"),
+    "create-linear": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'linear'; page.contentY = 360"),
+    "create-cliff": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'cliff-linear'; page.contentY = 360"),
+    "create-milestone": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.cKind = 'milestone'; page.contentY = 360"),
+    "create-names": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'pay'"),
+    "confirm-cancel": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.askGrave('cancel', root.mySchedules[0])"),
+    "settings": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'settings'"),
+    "wallet-folder-wrong": ({"settings": WRONG}, {}, ""),
 }
 
 BRIDGE = r"""
@@ -96,15 +124,22 @@ BRIDGE = r"""
         }
         function callModule(module, method, args) {
             var answers = %(answers)s
-            if (answers.__missing) return "Module not connected: " + module
+            if (module === "names") {
+                var na = %(names)s
+                if (na.__missing) return "Module not connected: names"
+                var v = na[method]
+                return JSON.stringify(JSON.stringify(v === undefined ? { success: false, value: null, error: "not in this scenario" } : { success: true, value: v, error: null }))
+            }
             if (module !== "vesting") return ""
             var a = answers[method]
             // Basecamp may hand the module's JSON text encoded once more.
             return a === undefined ? JSON.stringify(JSON.stringify({ ok: false, error: "no answer in this scenario" })) : JSON.stringify(JSON.stringify(a))
         }
     }
+    Timer { id: later; interval: 400; onTriggered: root.confirmClaim() }
+    Timer { id: scroll; interval: 2600; onTriggered: page.contentY = Math.max(0, page.contentHeight - page.height) }
     Timer { interval: 300; running: true; onTriggered: { %(scenario)s; shot.start() } }
-    Timer { id: shot; interval: 600; onTriggered: root.grabToImage(function(result) { result.saveToFile("%(out)s"); Qt.quit() }) }
+    Timer { id: shot; interval: 2900; onTriggered: root.grabToImage(function(result) { result.saveToFile("%(out)s"); Qt.quit() }) }
 """
 
 
@@ -117,11 +152,12 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     failed = 0
     for name in wanted:
-        extra, script = SCENARIOS[name]
-        answers = {"settings": SETTINGS, "accounts": ACCOUNTS, "list": LIST, "now": {"ok": True, "time": NOW}}
+        extra, names, script = SCENARIOS[name]
+        answers = {"settings": SETTINGS, "accounts": ACCOUNTS, "list": LIST, "now": {"ok": True, "time": NOW}, "set_accounts": {"ok": True},
+                   "configure": {"ok": True}}
         answers.update(extra)
         out = os.path.join(out_dir, name + ".png")
-        bridge = BRIDGE % {"answers": json.dumps(answers), "scenario": script or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
+        bridge = BRIDGE % {"answers": json.dumps(answers), "names": json.dumps(names), "scenario": script or "0", "out": out, "height": int(os.environ.get("RENDER_HEIGHT", "700"))}
         with tempfile.NamedTemporaryFile("w", suffix=".qml", delete=False, dir=os.path.join(HERE, "..", "qml")) as handle:
             handle.write(source.replace(marker, marker + bridge, 1))
         try:

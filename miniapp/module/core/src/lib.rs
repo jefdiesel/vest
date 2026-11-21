@@ -15,6 +15,7 @@
 
 mod backend;
 pub mod display;
+mod names_backend;
 pub mod network;
 mod wire;
 
@@ -28,17 +29,94 @@ use vesting_core::{AccountId, Schedule};
 use vesting_sdk::names::{self, NameBook, RpcClient};
 use vesting_sdk::{AccountKind, AccountRef, Client, FeePayer, PreClaimSummary, SdkError};
 
+pub use names_backend::NOT_YET as NAMES_NOT_YET;
+
+/// Who signs: the person's Names Wallet (the default in the app), or a wallet folder this module
+/// opens itself (Settings, Advanced; the JSON test ledger in builds without `lez`).
+pub enum AppBackend {
+    #[cfg(feature = "lez")]
+    Wallet(vesting_sdk::LezBackend),
+    #[cfg(not(feature = "lez"))]
+    Wallet(backend::JsonFileBackend),
+    Names(names_backend::NamesBackend),
+}
+
+macro_rules! each {
+    ($self:expr, $b:ident => $e:expr) => {
+        match $self {
+            AppBackend::Wallet($b) => $e,
+            AppBackend::Names($b) => $e,
+        }
+    };
+}
+
+impl vesting_sdk::Backend for AppBackend {
+    fn now(&self) -> vesting_core::Timestamp {
+        each!(self, b => b.now())
+    }
+    fn load(&self, id: u64) -> Result<Schedule, vesting_sdk::BackendError> {
+        each!(self, b => b.load(id))
+    }
+    fn store(&mut self, id: u64, s: &Schedule) -> Result<(), vesting_sdk::BackendError> {
+        each!(self, b => b.store(id, s))
+    }
+    fn next_id(&mut self) -> u64 {
+        each!(self, b => b.next_id())
+    }
+    fn list(&self) -> Vec<(u64, Schedule)> {
+        each!(self, b => b.list())
+    }
+    fn submit(&mut self, e: &vesting_core::Event) -> Result<(), vesting_sdk::BackendError> {
+        each!(self, b => b.submit(e))
+    }
+    fn set_claim_target(&mut self, t: [u8; 32]) {
+        each!(self, b => b.set_claim_target(t))
+    }
+    fn set_caller(&mut self, c: [u8; 32]) {
+        each!(self, b => b.set_caller(c))
+    }
+    fn estimate_fee(
+        &mut self,
+        id: u64,
+        s: &Schedule,
+        e: &vesting_core::Event,
+    ) -> Result<Option<vesting_sdk::FeeEstimate>, vesting_sdk::BackendError> {
+        each!(self, b => b.estimate_fee(id, s, e))
+    }
+    fn submit_batch(
+        &mut self,
+        items: &[(u64, Schedule, vesting_core::Event)],
+    ) -> Result<(), vesting_sdk::BackendError> {
+        each!(self, b => b.submit_batch(items))
+    }
+}
+
+impl ModuleBackend for AppBackend {
+    fn accounts(&self) -> Result<Vec<WalletAccount>, String> {
+        each!(self, b => b.accounts())
+    }
+    fn import_account(&mut self, a: AccountId) -> Result<u64, String> {
+        each!(self, b => b.import_account(a))
+    }
+    fn schedule_address(&self, id: u64) -> Option<AccountId> {
+        each!(self, b => b.schedule_address(id))
+    }
+}
+
+/// The signer when the settings name none: Names Wallet in the app; the JSON ledger in tests.
 #[cfg(feature = "lez")]
-type AppBackend = vesting_sdk::LezBackend;
+const DEFAULT_SIGNER: &str = "names";
 #[cfg(not(feature = "lez"))]
-type AppBackend = backend::JsonFileBackend;
+const DEFAULT_SIGNER: &str = "wallet";
 
 /// Settings, saved as `settings.json` in the module's data folder. Empty strings mean "use
 /// the network's value" (or "none"). The wallet password is never saved.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Settings {
-    /// A LEZ rc3 wallet folder (`wallet_config.json` + `storage.json`).
+    /// Who signs: "names" (Names Wallet) or "wallet" (the wallet folder below). Empty: the default.
+    pub signer: String,
+    /// A LEZ rc3 wallet folder (`wallet_config.json` + `storage.json`), for signer "wallet".
     pub wallet_dir: String,
     /// A `names-network` file; empty: the built-in profile (the public rc3 demo chain).
     pub network_file: String,
@@ -54,6 +132,9 @@ pub struct Settings {
     /// Token schedules: the creator's fee float for private claims (decimal strings).
     pub sponsor_deposit: String,
     pub sponsor_per_claim: String,
+    /// The accounts (Names Wallet's `Public/<id>`) whose person has finished the first-run
+    /// guide: the app folds its guides away for them.
+    pub guide_done: Vec<String>,
     /// Tests only (the JSON backend): ledger file, fixed clock and the "wallet" accounts.
     pub state_path: String,
     pub now: Option<u64>,
@@ -87,6 +168,10 @@ pub struct Module {
     /// Tests: put the relay in front of a local RPC too, with this policy.
     guard_local: Option<vesting_sdk::rpc_guard::Policy>,
     caching: bool,
+    /// The accounts Names Wallet gave this app (`granted_accounts` + `account_balances`).
+    names_accounts: Vec<WalletAccount>,
+    /// Tests: the chain reads of the Names signer go here instead of the network.
+    chain_client: Option<RpcClient>,
 }
 
 fn ok(mut value: Value) -> String {
@@ -156,6 +241,8 @@ impl Module {
             accounts_cache: None,
             guard_local: None,
             caching: true,
+            names_accounts: Vec::new(),
+            chain_client: None,
         }
     }
 
@@ -165,8 +252,8 @@ impl Module {
         self.caching = on;
         self.accounts_cache = None;
         #[cfg(feature = "lez")]
-        if let Some(client) = self.client.as_mut() {
-            client.backend_mut().set_caching(on);
+        if let Some(AppBackend::Wallet(backend)) = self.client.as_mut().map(|c| c.backend_mut()) {
+            backend.set_caching(on);
         }
     }
 
@@ -174,6 +261,11 @@ impl Module {
     #[doc(hidden)]
     pub fn network_requests(&self) -> Option<(std::collections::BTreeMap<String, u64>, u64)> {
         self.guard.as_ref().map(|g| g.stats())
+    }
+
+    /// Tests: the Names signer reads the chain through this client (used at the next open).
+    pub fn set_chain_client(&mut self, client: RpcClient) {
+        self.chain_client = Some(client);
     }
 
     /// Tests: route even a local RPC through the relay, with `policy`.
@@ -249,38 +341,77 @@ impl Module {
         Ok(url)
     }
 
+    /// "names" or "wallet".
+    pub fn signer(&self) -> &str {
+        match self.settings.signer.trim() {
+            "" => DEFAULT_SIGNER,
+            other => other,
+        }
+    }
+
+    fn names_mode(&self) -> bool {
+        self.signer() == "names"
+    }
+
+    /// The chain check: the RPC must serve the network's chain (a local RPC may go unchecked).
+    fn check_chain(&mut self, net: &Network) -> Result<(), String> {
+        if net.rpc.is_empty() {
+            return Err("no RPC: set one, or a network file".into());
+        }
+        if net.chain_id.is_empty() {
+            if !network::is_loopback(&net.rpc) {
+                return Err(format!(
+                    "{} is not a local RPC: give its chain id (or a network file)",
+                    net.rpc
+                ));
+            }
+            return Ok(());
+        }
+        let via = self.rpc_url(&net.rpc)?;
+        let served = network::channel_id(&names::http_client(&via))?;
+        if served != net.chain_id {
+            return Err(format!(
+                "{} serves chain {served}, not {}: check the RPC and the network",
+                net.rpc, net.chain_id
+            ));
+        }
+        Ok(())
+    }
+
     /// Open the backend from the settings (the chain check first).
     fn open(&mut self) -> Result<(), String> {
         let net = self.effective_network()?;
         if let Some(decimals) = self.settings.decimals {
             display::set_decimals(decimals);
         }
+        if self.names_mode() {
+            self.check_chain(&net)?;
+            let program = net
+                .program
+                .ok_or("this network names no vesting program: set one in Settings")?;
+            let reads = match self.chain_client.take() {
+                Some(client) => client,
+                None => names::http_client(&self.rpc_url(&net.rpc)?),
+            };
+            let backend = names_backend::NamesBackend::open(
+                reads,
+                program,
+                &self.dir.join("vesting-names-ids.json"),
+                self.names_accounts.clone(),
+            )
+            .map_err(|e| e.to_string())?;
+            self.network = Some(net);
+            self.client = Some(Client::new(AppBackend::Names(backend)));
+            self.status = "ready".into();
+            return Ok(());
+        }
         #[cfg(feature = "lez")]
         let client = {
             use std::path::PathBuf;
-            if net.rpc.is_empty() {
-                return Err("no RPC: set one, or a network file".into());
-            }
-            if net.chain_id.is_empty() {
-                if !network::is_loopback(&net.rpc) {
-                    return Err(format!(
-                        "{} is not a local RPC: give its chain id (or a network file)",
-                        net.rpc
-                    ));
-                }
-            } else {
-                let via = self.rpc_url(&net.rpc)?;
-                let served = network::channel_id(&names::http_client(&via))?;
-                if served != net.chain_id {
-                    return Err(format!(
-                        "{} serves chain {served}, not {}: check the RPC and the network",
-                        net.rpc, net.chain_id
-                    ));
-                }
-            }
+            self.check_chain(&net)?;
             let wallet_dir = self.settings.wallet_dir.trim().to_string();
             if wallet_dir.is_empty() {
-                return Err("set the wallet folder (a LEZ rc3 wallet) in Settings".into());
+                return Err("set the wallet folder in Settings, Advanced".into());
             }
             let program = net
                 .program
@@ -308,7 +439,7 @@ impl Module {
             ) {
                 backend.set_sponsor(deposit, per_claim);
             }
-            Client::new(backend)
+            Client::new(AppBackend::Wallet(backend))
         };
         #[cfg(not(feature = "lez"))]
         let client = {
@@ -326,10 +457,10 @@ impl Module {
                     balance: account.balance.parse().unwrap_or(0),
                 });
             }
-            Client::new(
+            Client::new(AppBackend::Wallet(
                 backend::JsonFileBackend::open(&path, self.settings.now, accounts)
                     .map_err(|e| e.to_string())?,
-            )
+            ))
         };
         self.network = Some(net);
         self.client = Some(client);
@@ -437,8 +568,10 @@ impl Module {
 
     fn tx(&self) -> Value {
         #[cfg(feature = "lez")]
-        if let Some(last) = self.client.as_ref().and_then(|c| c.backend().last_tx()) {
-            return json!({ "hash": last.hash, "block": last.block });
+        if let Some(AppBackend::Wallet(backend)) = self.client.as_ref().map(|c| c.backend()) {
+            if let Some(last) = backend.last_tx() {
+                return json!({ "hash": last.hash, "block": last.block });
+            }
         }
         Value::Null
     }
@@ -471,6 +604,7 @@ impl Module {
             "connected": self.client.is_some(),
             "status": self.status,
             "has_password": self.password.is_some(),
+            "signer": self.signer(),
             "chain": cfg!(feature = "lez"),
             "data_dir": self.dir.display().to_string(),
             "network_requests": self.guard.as_ref().map(|g| {
@@ -649,6 +783,9 @@ impl Module {
     /// token definition), `total`, `kind`, flags, authorities); accounts may be names.
     pub fn create(&mut self, input: &str) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let mut row: Value =
                 serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -672,6 +809,9 @@ impl Module {
     /// `Client::create_batch`: a JSON array of schedules (one creator), one transaction.
     pub fn create_batch(&mut self, input: &str) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let value: Value =
                 serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -713,6 +853,9 @@ impl Module {
     /// `Client::claim_public`, by the schedule's beneficiary.
     pub fn claim_public(&mut self, id: u64) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             match self.client()?.claim_public(id, caller) {
@@ -727,6 +870,9 @@ impl Module {
     /// fee is simulated first: a claim whose private destination couldn't pay is not sent.
     pub fn claim_private(&mut self, id: u64, target: &str) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             let (target, _) = self.resolve(target.trim())?;
@@ -764,6 +910,9 @@ impl Module {
     /// `Client::cancel`, by the schedule's cancel authority.
     pub fn cancel(&mut self, id: u64) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.cancel_authority;
             match self.client()?.cancel(id, caller) {
@@ -779,6 +928,9 @@ impl Module {
     /// `Client::make_irrevocable`, by the schedule's cancel authority.
     pub fn make_irrevocable(&mut self, id: u64) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.cancel_authority;
             match self.client()?.make_irrevocable(id, caller) {
@@ -791,6 +943,9 @@ impl Module {
     /// `Client::signal_milestone`, by the schedule's milestone authority.
     pub fn signal_milestone(&mut self, id: u64, index: u64) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.milestone_authority;
             match self.client()?.signal_milestone(id, caller, index as usize) {
@@ -806,6 +961,9 @@ impl Module {
     /// `Client::transfer_beneficiary`, by the schedule's beneficiary.
     pub fn transfer_beneficiary(&mut self, id: u64, new_beneficiary: &str) -> String {
         self.forget_reads();
+        if self.names_mode() {
+            return fail(NAMES_NOT_YET);
+        }
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             let (to, name) = self.resolve(new_beneficiary.trim())?;
@@ -825,6 +983,74 @@ impl Module {
             let (account, _) = self.resolve(account.trim())?;
             let id = self.client()?.backend_mut().import_account(account)?;
             Ok(ok(json!({ "id": id })))
+        })
+    }
+
+    /// The accounts Names Wallet gave this app, as the app read them there: a JSON array of
+    /// `{account: "Public/<id>" | "Private/<id>", account_kind, balance}` (`granted_accounts`
+    /// with `account_balances`). They decide which schedules are "yours" and who claims.
+    pub fn set_accounts(&mut self, input: &str) -> String {
+        answer(|| {
+            let rows: Vec<Value> =
+                serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
+            let mut accounts = Vec::new();
+            for row in rows {
+                let text = row.get("account").and_then(Value::as_str).unwrap_or("");
+                let id = names::parse_address(text)
+                    .ok_or_else(|| format!("'{text}' is not an account"))?;
+                let private = text.starts_with("Private/")
+                    || row.get("account_kind").and_then(Value::as_str) == Some("private");
+                let balance = row
+                    .get("balance")
+                    .and_then(Value::as_str)
+                    .and_then(|b| b.parse().ok())
+                    .unwrap_or(0);
+                accounts.push(WalletAccount {
+                    id,
+                    private,
+                    balance,
+                });
+            }
+            self.names_accounts = accounts.clone();
+            self.accounts_cache = None;
+            if let Some(AppBackend::Names(backend)) = self.client.as_mut().map(|c| c.backend_mut())
+            {
+                backend.set_accounts(accounts.clone());
+            }
+            Ok(ok(json!({ "accounts": accounts.len() })))
+        })
+    }
+
+    /// The Names Wallet `propose_call` arguments that claim schedule `id` publicly for its
+    /// beneficiary, one of the accounts Names gave: `{program, accounts_json, instruction_hex,
+    /// summary, amount, amount_display, caller}`. Names Wallet signs it once the person approves.
+    pub fn claim_call(&mut self, id: u64) -> String {
+        answer(|| {
+            if !self.names_mode() {
+                return Err(
+                    "claim_call is for Names Wallet; this module signs with a wallet folder".into(),
+                );
+            }
+            let schedule = self.schedule(id)?;
+            let mine = self.wallet_accounts()?;
+            if !mine
+                .iter()
+                .any(|a| !a.private && a.id == schedule.beneficiary)
+            {
+                return Err("this schedule pays an account Names Wallet hasn't shared with Vest: connect that account in Names Wallet".into());
+            }
+            let Some(AppBackend::Names(backend)) = self.client.as_ref().map(|c| c.backend()) else {
+                return Err("not connected".into());
+            };
+            let mut call = backend.claim_call(id, schedule.beneficiary)?;
+            let amount: u128 = call["amount"].as_str().unwrap_or("0").parse().unwrap_or(0);
+            call["amount_display"] = json!(display::amount(amount));
+            call["summary"] = json!(format!(
+                "Claim {} from Vest schedule {} to this account",
+                display::amount(amount),
+                id
+            ));
+            Ok(ok(call))
         })
     }
 

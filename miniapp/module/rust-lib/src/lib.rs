@@ -46,6 +46,10 @@ pub trait VestingModule: Send + 'static {
     fn import_schedule(&mut self, account: String) -> String;
     /// Resolve an LNS name (or check an address).
     fn resolve_name(&mut self, name: String) -> String;
+    /// The accounts Names Wallet gave Vest (JSON array of `{account, account_kind, balance}`).
+    fn set_accounts(&mut self, accounts: String) -> String;
+    /// The Names Wallet `propose_call` arguments that claim schedule `id` publicly.
+    fn claim_call(&mut self, id: String) -> String;
 
     /// The host's context: the persistence folder for settings and the id map.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -144,6 +148,15 @@ impl VestingModule for Vesting {
     }
     fn resolve_name(&mut self, name: String) -> String {
         self.m().resolve_name(&name)
+    }
+    fn set_accounts(&mut self, accounts: String) -> String {
+        self.m().set_accounts(&accounts)
+    }
+    fn claim_call(&mut self, id: String) -> String {
+        match parse_index("id", &id) {
+            Ok(id) => self.m().claim_call(id),
+            Err(error) => bad_input(error),
+        }
     }
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {
         let dir = std::path::PathBuf::from(&ctx.instance_persistence_path);

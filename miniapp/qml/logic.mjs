@@ -612,3 +612,139 @@ export function hostOf(url) {
     var m = /^[a-z]+:\/\/([^\/?#]+)/i.exec(String(url == null ? "" : url))
     return m ? m[1] : String(url == null ? "" : url)
 }
+
+// ── Names Wallet ────────────────────────────────────────────────────────────────────
+
+export const NAMES_MISSING = "Names Wallet isn't installed, or isn't open. Install Names from Basecamp's app list, open it once, then come back here."
+
+/// A reply of the names module (Provider SDK): `{ok, value}`, `{ok: false, busy: true}` (nothing
+/// happened: ask again), `{ok: false, missing: true}` (Names isn't installed or open), or a
+/// refusal with its words.
+export function namesReply(raw) {
+    var parsed = raw
+    for (var depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
+        try { parsed = JSON.parse(parsed) } catch (error) { break }
+    }
+    if (parsed && typeof parsed === "object" && parsed.busy === true) return { ok: false, busy: true, error: "Names Wallet is busy." }
+    if (parsed && typeof parsed === "object" && parsed.success !== undefined)
+        return parsed.success ? { ok: true, value: parsed.value } : { ok: false, error: String(parsed.error || "Names Wallet said no.") }
+    var said = typeof raw === "string" ? raw : JSON.stringify(raw)
+    if (raw === undefined || raw === null || String(raw) === "") return { ok: false, busy: true, error: "No answer from Names Wallet yet." }
+    if (/not connected|not reachable|no such|unknown (module|method)|method not found|not found|not loaded|not installed|call refused/i.test(said || ""))
+        return { ok: false, missing: true, error: NAMES_MISSING }
+    return { ok: false, error: "Names Wallet answered something Vest can't read." }
+}
+
+
+/// The `get_config` zone check: "" when Names Wallet is on `chainId`, else what to do.
+export function zoneProblem(config, chainId) {
+    var zone = config && config.zone ? config.zone : null
+    var channel = zone && zone.channel ? String(zone.channel).toLowerCase() : ""
+    if (!chainId || !channel) return ""
+    return channel === String(chainId).toLowerCase() ? "" : "Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names: Settings, Network), then come back."
+}
+
+/// What a Names request's state means on screen, in one line ("" while nothing to say).
+export function requestLine(request, what) {
+    var r = request || {}
+    var thing = what || "the request"
+    if (r.state === "pending") return "Waiting for you to approve " + thing + " in Names Wallet."
+    if (r.state === "running") return "Names Wallet is sending " + thing + "…"
+    if (r.state === "rejected") return "You declined " + thing + " in Names Wallet. Nothing was sent."
+    if (r.state === "expired") return "Nobody approved " + thing + " within 10 minutes, so Names Wallet dropped it. Nothing was sent."
+    if (r.state === "cancelled") return "You withdrew " + thing + ". Nothing was sent."
+    if (r.state === "failed") return "Names Wallet couldn't send " + thing + (r.error ? ": " + r.error : "") + "."
+    return ""
+}
+
+/// Whether a Names request is still open (keep polling).
+export function requestOpen(request) {
+    var s = (request || {}).state
+    return s === "pending" || s === "running"
+}
+
+/// Names `granted_accounts` + `account_balances` as the vesting module's `set_accounts` input.
+export function namesAccounts(granted, balances) {
+    var b = {}
+    ;(balances || []).forEach(function(x) { b[x.account] = x.balance })
+    return ((granted && granted.accounts) || []).map(function(a) {
+        return { account: a.account, account_kind: a.account_kind, balance: b[a.account] || "0" }
+    })
+}
+
+// ── Guides ──────────────────────────────────────────────────────────────────────────
+
+/// The steps of each role, with the current one marked: `[{n, text, state}]`, state is
+/// `done`, `now` or `later`. `at` is how far the person got (0-based index of the current step).
+export function guideSteps(role, at) {
+    var steps = role === "pay"
+        ? ["Connect Names Wallet",
+           "Choose who, how much and the schedule",
+           "Approve it in Names Wallet",
+           "Share the schedule's address or your LNS name with them",
+           "Cancel it, or make it permanent, later if you need to"]
+        : ["Connect Names Wallet",
+           "Your schedules appear here (or paste the address someone sent you)",
+           "See what you can claim now and when the rest unlocks",
+           "Claim to your public account, or privately",
+           "Approve it in Names Wallet"]
+    return steps.map(function(text, i) {
+        return { n: i + 1, text: text, state: i < at ? "done" : i === at ? "now" : "later" }
+    })
+}
+
+/// Where a receiver is in their guide: 0 connect, 1 schedules, 2 look, 3 claim, 4 approve.
+export function receiveStep(s) {
+    s = s || {}
+    if (!s.connected) return 0
+    if (!s.schedules) return 1
+    if (s.approving) return 4
+    if (s.claimable) return 3
+    return 2
+}
+
+/// Where a payer is in their guide: 0 connect, 1 choose, 2 approve, 3 share, 4 later.
+export function payStep(s) {
+    s = s || {}
+    if (!s.connected) return 0
+    if (s.approving) return 2
+    if (s.justCreated) return 3
+    if (s.manages) return 4
+    return 1
+}
+
+/// What each kind of schedule means, in one sentence.
+export function kindExplain(kind) {
+    if (kind === "cliff-linear") return "Nothing unlocks before the cliff date. At the cliff, everything earned so far unlocks at once; after that it keeps unlocking a little every moment until the end date."
+    if (kind === "milestone") return "Each part unlocks when you (or the person you name) say a milestone was reached, not on a date."
+    return "It unlocks a little every moment, evenly, from the start date to the end date."
+}
+
+/// The timeline drawing of a kind: segments from 0 to 1 across, each `{from, to, kind}` with
+/// kind `locked`, `cliff` (a jump), `unlocking` or `steps` (milestones).
+export function timeline(kind) {
+    if (kind === "cliff-linear") return [{ from: 0, to: 0.3, kind: "locked" }, { from: 0.3, to: 0.3, kind: "cliff" }, { from: 0.3, to: 1, kind: "unlocking" }]
+    if (kind === "milestone") return [{ from: 0, to: 0.25, kind: "locked" }, { from: 0.25, to: 0.6, kind: "steps" }, { from: 0.6, to: 1, kind: "steps" }]
+    return [{ from: 0, to: 1, kind: "unlocking" }]
+}
+
+/// What happens next, after each action: one line for the Result line.
+export function nextLine(action, info) {
+    info = info || {}
+    if (action === "create") return "Schedule " + info.id + " is live. Send them its address or your LNS name so they can find it in Vest."
+    if (action === "batch") return "The schedules are live. Send each person their schedule's address or your LNS name."
+    if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
+    if (action === "cancel") return "Nothing more unlocks. What had already vested stays theirs to claim."
+    if (action === "irrevocable") return "Nobody can cancel it any more; it runs to the end."
+    if (action === "signal") return "They can claim that part now."
+    if (action === "transfer") return "The new beneficiary claims from now on; send them the schedule's address."
+    if (action === "import") return "It's in your list. Choose it to see what you can claim."
+    if (action === "connect") return "Connected. Your schedules are below; if someone sent you one, paste its address."
+    return ""
+}
+
+/// The full guide (the repository's user guide).
+export const GUIDE_URL = "https://github.com/jefdiesel/vest/blob/main/docs/USER-GUIDE.md"
+
+/// Why paying out needs a wallet folder for now (Names Wallet's program calls can't carry it).
+export const NAMES_CANT_PAY = "Names Wallet can approve claims, but not yet a new schedule, a cancel or a milestone: those also read the network's clock in the same step, and Names Wallet's program calls can't include that yet. Until they can, use a wallet folder (Settings, Advanced) to pay out. You can still read how it works below."

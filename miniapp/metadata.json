@@ -1,16 +1,16 @@
 {
   "name": "vesting_ui",
-  "display_name": "Vesting",
-  "version": "0.2.3",
+  "display_name": "Vest",
+  "version": "0.3.0",
   "type": "ui_qml",
   "category": "finance",
-  "description": "View and manage LEZ vesting schedules: claim to a public or private account, create, cancel, signal, transfer",
+  "description": "Pay tokens out over time, or claim what has vested to you; signs through your Names Wallet",
   "view": "qml/Main.qml",
   "icon": "src/icons/icon.png",
   "dependencies": [
     {
       "name": "vesting",
-      "version": ">=0.2.0"
+      "version": ">=0.3.0"
     }
   ],
   "provides": [],
@@ -26,6 +26,14 @@
       "extra_sources": [],
       "extra_include_dirs": [],
       "extra_link_libraries": []
+    }
+  },
+  "optional_dependencies": [
+    "names"
+  ],
+  "dependency_overrides": {
+    "names": {
+      "file": "lidl/names.lidl"
     }
   }
 }

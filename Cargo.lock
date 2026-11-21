@@ -10275,9 +10275,11 @@ dependencies = [
  "borsh",
  "bs58",
  "hex",
+ "lee_core",
  "serde",
  "serde_json",
  "vesting-core",
+ "vesting-program",
  "vesting-sdk",
 ]
 

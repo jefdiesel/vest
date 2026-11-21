@@ -183,6 +183,34 @@ check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nam
   check("the kit is used, Vest's own copies are gone", [/import "kit"/.test(qml), /component (Action|Field|Link|Toggle|Fact|Panel):/.test(qml)], [true, false]);
 }
 
+// ── Names Wallet ───────────────────────────────────────────────────────────────────
+check("namesReply: value, busy, refusal, missing", [
+  L.namesReply(JSON.stringify({ success: true, value: { connected: true }, error: null })).value.connected,
+  L.namesReply(JSON.stringify({ success: false, busy: true, value: null, error: "The wallet is busy; still working." })).busy,
+  L.namesReply({ success: false, value: null, error: "ask for access first" }).error,
+  L.namesReply("Module not connected: names").missing,
+  L.namesReply("").busy], [true, true, "ask for access first", true, true]);
+check("zone check", [L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7"), /Switch Names Wallet to the bridge test network/.test(L.zoneProblem({ zone: { channel: "01" } }, "2da7")), L.zoneProblem({}, "2da7")], ["", true, ""]);
+check("request lines", [L.requestLine({ state: "pending" }, "the claim"), L.requestLine({ state: "rejected" }, "the claim"), L.requestLine({ state: "done" }), L.requestOpen({ state: "running" }), L.requestOpen({ state: "done" })],
+  ["Waiting for you to approve the claim in Names Wallet.", "You declined the claim in Names Wallet. Nothing was sent.", "", true, false]);
+check("namesAccounts joins balances", L.namesAccounts({ accounts: [{ account: "Public/A", account_kind: "public" }, { account: "Private/B", account_kind: "private" }] }, [{ account: "Public/A", balance: "12" }]),
+  [{ account: "Public/A", account_kind: "public", balance: "12" }, { account: "Private/B", account_kind: "private", balance: "0" }]);
+
+// ── Guides ────────────────────────────────────────────────────────────────────────
+check("guide: receiving, five one-line steps, current marked", L.guideSteps("receive", 2).map(s => s.state), ["done", "done", "now", "later", "later"]);
+check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "Share the schedule's address or your LNS name with them", "Cancel it, or make it permanent, later if you need to"]);
+check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
+check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
+check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);
+check("timelines", [L.timeline("linear").length, L.timeline("cliff-linear")[1].kind, L.timeline("milestone").every(s => s.kind !== "unlocking")], [1, "cliff", true]);
+check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. Send them its address or your LNS name so they can find it in Vest.", true, ""]);
+{
+  const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has vested to you\./.test(qml)], [false, false, true]);
+  check("names calls pass text only", [...qml.matchAll(/namesCall\("(\w+)",\s*(\[[^\]]*\])/g)].filter(m => /Number\(/.test(m[2])).map(m => m[1]), []);
+  check("first run asks to connect Names Wallet, not for a wallet folder", [/label: "Connect Names Wallet"/.test(qml), /Advanced: a wallet folder/.test(qml)], [true, true]);
+}
+
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
 const reserved = /\.(public|private|protected|package|interface|implements|static|let|yield|enum|class|const|export|import|extends|super)\b/;
 for (const file of ["./qml/Main.qml", "./qml/logic.mjs", ...["Action", "BackButton", "FactRow", "Field", "Link", "Look", "PageHeader", "RunsOn", "TechDetails", "Tick"].map(k => `./qml/kit/${k}.qml`)]) {

@@ -24,7 +24,7 @@ Licence: MIT OR Apache-2.0.
 
 Documentation: [program IDL](docs/IDL.md) · [events](docs/EVENTS.md) · [costs and batch limit](docs/COSTS.md) ·
 [reliability tests](docs/RELIABILITY-TESTS.md) · [SPEL notes](docs/SPEL-GAP.md) ·
-[Basecamp click-through test](docs/BASECAMP-TEST.md) · [RFP-017 requirements → evidence](docs/REQUIREMENTS-MAP.md).
+[the user guide](docs/USER-GUIDE.md) · [Basecamp click-through test](docs/BASECAMP-TEST.md) · [RFP-017 requirements → evidence](docs/REQUIREMENTS-MAP.md).
 
 ## Build and test
 

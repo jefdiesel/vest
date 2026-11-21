@@ -9381,9 +9381,11 @@ dependencies = [
  "borsh",
  "bs58",
  "hex",
+ "lee_core",
  "serde",
  "serde_json",
  "vesting-core",
+ "vesting-program",
  "vesting-sdk",
 ]
 
@@ -9427,6 +9429,7 @@ dependencies = [
  "serde_json",
  "token_core",
  "tokio",
+ "ureq 2.12.1",
  "url",
  "vesting-core",
  "vesting-program",

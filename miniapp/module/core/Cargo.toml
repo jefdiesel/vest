@@ -13,6 +13,9 @@ lez = ["vesting-sdk/lez"]
 [dependencies]
 vesting-sdk = { path = "../../../sdk", features = ["names", "guard"] }
 vesting-core = { path = "../../../core" }
+# The program's own types: the claim message Names Wallet signs, and the schedule state it reads.
+vesting-program = { path = "../../../program" }
+lee_core = { git = "https://github.com/logos-blockchain/logos-execution-zone.git", tag = "v0.4.0-rc3" }
 borsh = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
