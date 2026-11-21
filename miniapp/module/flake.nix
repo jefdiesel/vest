@@ -53,6 +53,20 @@
         };
       };
       systems = builtins.attrNames rapidsnarkZip;
+      # The Logos blockchain circuits (in the LEZ wallet's dependencies) download their prebuilt
+      # libraries in a build script, which a sandboxed Linux build cannot: the same release
+      # archive is fetched here and handed in through LBC_ROOT_DIR. (macOS builds unsandboxed
+      # and keeps the build script's own download.)
+      circuitsTarball = {
+        x86_64-linux = {
+          url = "https://github.com/logos-blockchain/logos-blockchain-circuits/releases/download/v0.5.7/logos-blockchain-circuits-v0.5.7-linux-x86_64.tar.gz";
+          sha256 = "92a0c6ad810d486631518b7b9b247a2b66f66af6f8f8ddce381acbbdfedc0f7f";
+        };
+        aarch64-linux = {
+          url = "https://github.com/logos-blockchain/logos-blockchain-circuits/releases/download/v0.5.7/logos-blockchain-circuits-v0.5.7-linux-aarch64.tar.gz";
+          sha256 = "1eaa3e339d85d741dd70314c4ad45b7ee67c2baaf6c55e35170801161c372d7b";
+        };
+      };
 
       # The builder takes one set of crate inputs for every system, so the module is built once
       # per system with that system's own inputs, and each system's outputs are taken from its
@@ -80,6 +94,10 @@
             exec /usr/bin/xcrun "$@"
           '';
           pcsc = lib.getLib pkgs.pcsclite;
+          circuits = pkgs.runCommand "logos-blockchain-circuits-v0.5.7" { } ''
+            mkdir -p $out
+            tar -xzf ${pkgs.fetchurl circuitsTarball.${system}} -C $out --strip-components=1
+          '';
           perOs =
             if pkgs.stdenv.isDarwin then {
               rustExtraNativeBuildInputs = [ systemXcrun lezArtifactsHook ];
@@ -96,6 +114,7 @@
               rustEnv = {
                 RAPIDSNARK_LIB_DIR = "${rapidsnark}";
                 PCSC_LIB_DIR = "${pcsc}/lib";
+                LBC_ROOT_DIR = "${circuits}";
               };
               # The plugin links PC/SC (CMakeLists.txt); the portable bundle then carries it.
               extraBuildInputs = [ pkgs.pcsclite ];
