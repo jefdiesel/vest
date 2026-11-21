@@ -2,13 +2,14 @@
 //! state, no wallet needed) and hands each write to the Names Wallet as a `propose_call`, which
 //! the person approves in the Names app (docs/wallet/PROVIDER-SDK.md of the Names Wallet).
 //!
-//! What Names Wallet's `propose_call` can carry today: one program, the chosen account's data for
-//! it, other accounts' data for it, its own accounts (PDAs) and LEZ balances. A public claim of a
-//! native-LEZ schedule fits exactly (`ClaimAsOf`). Creating, cancelling, making irrevocable,
-//! signalling and transferring also need the network's clock (another program's account), token
+//! What Names Wallet's `propose_call` can carry: one program, the chosen account's data for it,
+//! other accounts' data for it, its own accounts (PDAs), LEZ balances and, since Names 0.18, the
+//! network clock (another program's account, read only). A public claim of a native-LEZ schedule
+//! fits (`ClaimAsOf`), and so do creating, cancelling, making irrevocable, signalling and
+//! transferring a native-LEZ schedule, which read the clock (`create_call`, `op_call`). Token
 //! schedules need the token program's accounts, and a private claim needs a public signer with a
 //! private destination in one transaction: `propose_call` can't carry those, so this backend
-//! refuses them with plain words (`NOT_YET`).
+//! refuses them with plain words.
 
 use crate::backend::{ModuleBackend, WalletAccount};
 use serde::{Deserialize, Serialize};
@@ -16,12 +17,44 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use vesting_core::{AccountId, Event, Schedule, Timestamp};
-use vesting_program::{clock, Asset, Instruction, ScheduleState};
+use vesting_program::{clock, schedule_seed, Asset, Instruction, NewSchedule, ScheduleState};
 use vesting_sdk::names::{base58, RpcClient};
 use vesting_sdk::{Backend, BackendError, ScheduleId};
 
-/// What Names Wallet can't sign for Vest yet, said once for every such action.
-pub const NOT_YET: &str = "Names Wallet can't sign this for Vest yet: it needs the network's clock in the same call, which Names Wallet's program calls don't carry. Claiming works now; to create or manage schedules, use a wallet folder (Settings, Advanced).";
+/// What the module's direct writes answer with Names Wallet as the signer: those go through
+/// Names Wallet as `propose_call`s (`create_call`, `claim_call`, `cancel_call`, ...), which the
+/// person approves in the Names app.
+pub const NOT_YET: &str = "With Names Wallet, Vest asks Names to sign each change: approve it in the Names app (create_call, claim_call, cancel_call, irrevocable_call, signal_call, transfer_call). To sign here instead, use a wallet folder (Settings, Advanced).";
+
+/// What Names Wallet can't do for a token schedule yet.
+const NO_TOKENS: &str = "Names Wallet can't sign for a token schedule yet: it reaches the token program's accounts, which Names Wallet's program calls don't carry. LEZ schedules work.";
+
+/// An operation on an existing schedule that reads the clock, as Names Wallet signs it.
+pub enum NamesOp {
+    Cancel,
+    MakeIrrevocable,
+    SignalMilestone(u32),
+    TransferBeneficiary(AccountId),
+}
+
+/// The network clock as Names Wallet 0.18's `propose_call` takes it: another program's account,
+/// read only (`{"account", "program"}`).
+pub fn clock_entry() -> Value {
+    json!({
+        "account": base58(&clock::CLOCK_PROGRAM_ACCOUNT_ID.into_value()),
+        "program": base58(&clock::clock_account_id().into_value()),
+    })
+}
+
+/// 32 random bytes: a new schedule's nonce.
+pub fn random_nonce() -> Result<[u8; 32], String> {
+    use std::io::Read as _;
+    let mut out = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut out))
+        .map_err(|e| format!("could not make a nonce: {e}"))?;
+    Ok(out)
+}
 
 #[derive(Serialize, Deserialize, Default)]
 struct IdMap {
@@ -151,6 +184,153 @@ impl NamesBackend {
             "caller": format!("Public/{}", base58(&caller)),
             "schedule_address": hex::encode(address),
             "as_of": at,
+        }))
+    }
+}
+
+impl NamesBackend {
+    /// The `propose_call` that creates one native-LEZ schedule from `params.creator` (the account
+    /// the person must choose): `Create` with the creator's LEZ (the total moves out of it), the
+    /// schedule's account (made, from its seed) and its LEZ, and the network clock. `nonce` picks
+    /// the schedule's address. Checked here first with the network's time, as the program will.
+    pub fn create_call(
+        &self,
+        params: vesting_core::CreateParams,
+        nonce: [u8; 32],
+    ) -> Result<Value, String> {
+        if params.token != [0u8; 32] {
+            return Err(NO_TOKENS.into());
+        }
+        let now = self.now();
+        if now == 0 {
+            return Err("could not read the network's clock".into());
+        }
+        vesting_core::create(params.clone(), now).map_err(|e| e.message())?;
+        let creator = lee(params.creator);
+        let program = lee(self.program);
+        let seed = schedule_seed(&creator, &nonce);
+        let address = lee_core::account::AccountId::for_public_pda(&program, &seed).into_value();
+        if self
+            .state_of(&address)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            return Err("a schedule with this nonce exists already; ask again".into());
+        }
+        let schedule = NewSchedule {
+            nonce,
+            beneficiary: lee(params.beneficiary),
+            asset: Asset::Native,
+            total: params.total,
+            kind: params.kind,
+            cancelable: params.cancelable,
+            transferable: params.transferable,
+            cancel_authority: params.cancel_authority.map(lee),
+            milestone_authority: params.milestone_authority.map(lee),
+            sponsor: None,
+        };
+        let message = borsh::to_vec(&Instruction::Create {
+            schedules: vec![schedule],
+        })
+        .map_err(|e| e.to_string())?;
+        let (s, seed) = (base58(&address), hex::encode(seed.as_ref()));
+        let accounts = json!([
+            { "account": "signer", "balance": true },
+            { "account": s, "seed": seed },
+            { "account": s, "seed": seed, "balance": true },
+            clock_entry(),
+        ]);
+        Ok(json!({
+            "program": base58(&self.program),
+            "accounts_json": accounts.to_string(),
+            "instruction_hex": hex::encode(message),
+            "amount": params.total.to_string(),
+            "caller": format!("Public/{}", base58(&params.creator)),
+            "schedule_address": s,
+            "schedule_address_hex": hex::encode(address),
+        }))
+    }
+
+    /// The `propose_call` for `op` on native-LEZ schedule `id` by `caller` (the account the
+    /// person must choose), checked first at the network's time as the program will run it. The
+    /// schedule's data and LEZ, the creator's LEZ for a cancel's refund, and the clock.
+    pub fn op_call(
+        &self,
+        id: ScheduleId,
+        caller: AccountId,
+        op: &NamesOp,
+    ) -> Result<Value, String> {
+        let address = self.address(id).map_err(|e| e.to_string())?;
+        let state = self
+            .state_of(&address)
+            .map_err(|e| e.to_string())?
+            .ok_or("this schedule isn't on the network")?;
+        if !matches!(state.asset, Asset::Native) {
+            return Err(NO_TOKENS.into());
+        }
+        if state.pending.is_some() {
+            return Err("this schedule is still being changed; try again in a moment".into());
+        }
+        let schedule = state
+            .schedule
+            .ok_or("this schedule is still being created; try again in a moment")?;
+        let now = self.now();
+        if now == 0 {
+            return Err("could not read the network's clock".into());
+        }
+        let schedule_id = lee(address);
+        let s = base58(&address);
+        let mut accounts = vec![json!(s), json!({ "account": s, "balance": true })];
+        let mut amount = 0u128;
+        let instruction = match op {
+            NamesOp::Cancel => {
+                let (_, refund, _) =
+                    vesting_core::cancel(&schedule, caller, now).map_err(|e| e.message())?;
+                amount = refund;
+                // The refund goes to the creator: the chosen account's LEZ when it is the creator.
+                accounts.push(if schedule.creator == caller {
+                    json!({ "account": "signer", "balance": true })
+                } else {
+                    json!({ "account": base58(&schedule.creator), "balance": true })
+                });
+                Instruction::Cancel {
+                    schedule: schedule_id,
+                }
+            }
+            NamesOp::MakeIrrevocable => {
+                vesting_core::make_irrevocable(&schedule, caller, now).map_err(|e| e.message())?;
+                Instruction::MakeIrrevocable {
+                    schedule: schedule_id,
+                }
+            }
+            NamesOp::SignalMilestone(index) => {
+                let (_, unlocked, _) =
+                    vesting_core::signal_milestone(&schedule, caller, *index as usize, now)
+                        .map_err(|e| e.message())?;
+                amount = unlocked;
+                Instruction::SignalMilestone {
+                    schedule: schedule_id,
+                    index: *index,
+                }
+            }
+            NamesOp::TransferBeneficiary(to) => {
+                vesting_core::transfer_beneficiary(&schedule, caller, *to, now)
+                    .map_err(|e| e.message())?;
+                Instruction::TransferBeneficiary {
+                    schedule: schedule_id,
+                    new_beneficiary: lee(*to),
+                }
+            }
+        };
+        accounts.push(clock_entry());
+        let message = borsh::to_vec(&instruction).map_err(|e| e.to_string())?;
+        Ok(json!({
+            "program": base58(&self.program),
+            "accounts_json": Value::Array(accounts).to_string(),
+            "instruction_hex": hex::encode(message),
+            "amount": amount.to_string(),
+            "caller": format!("Public/{}", base58(&caller)),
+            "schedule_address": s,
         }))
     }
 }

@@ -1054,6 +1054,151 @@ impl Module {
         })
     }
 
+    /// Names Wallet only: the first of `candidates` that is a public account Names Wallet shared
+    /// with Vest (the account the person must then choose in the Names prompt).
+    fn names_caller(&mut self, candidates: &[AccountId], role: &str) -> Result<AccountId, String> {
+        let mine = self.wallet_accounts()?;
+        candidates
+            .iter()
+            .copied()
+            .find(|c| mine.iter().any(|a| !a.private && a.id == *c))
+            .ok_or_else(|| {
+                format!("this needs the schedule's {role}, an account Names Wallet hasn't shared with Vest: connect that account in Names Wallet")
+            })
+    }
+
+    fn names_backend(&mut self) -> Result<&names_backend::NamesBackend, String> {
+        match self.client()?.backend() {
+            AppBackend::Names(backend) => Ok(backend),
+            #[allow(unreachable_patterns)]
+            _ => Err("not connected to Names Wallet".into()),
+        }
+    }
+
+    /// The Names Wallet `propose_call` arguments that create one native-LEZ schedule (the same
+    /// JSON object as `create`; accounts may be names): `{program, accounts_json,
+    /// instruction_hex, summary, amount, amount_display, caller, schedule_address,
+    /// schedule_address_hex, resolved}`. `caller` (the creator) is the account to choose in the
+    /// Names prompt. Once the request is `done`, `import_schedule(schedule_address)` gives the
+    /// schedule its local id. Needs Names Wallet 0.18 (it reads the network clock).
+    pub fn create_call(&mut self, input: &str) -> String {
+        self.forget_reads();
+        answer(|| {
+            if !self.names_mode() {
+                return Err(
+                    "create_call is for Names Wallet; this module signs with a wallet folder"
+                        .into(),
+                );
+            }
+            let mut row: Value =
+                serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
+            let mut resolved = Vec::new();
+            self.resolve_fields(&mut row, &mut resolved)?;
+            let params = wire::create_params(&row)?;
+            self.names_caller(&[params.creator], "creator")?;
+            let (total, beneficiary) = (params.total, params.beneficiary);
+            let nonce = names_backend::random_nonce()?;
+            let mut call = self.names_backend()?.create_call(params, nonce)?;
+            let to = resolved
+                .iter()
+                .find(|r| r["account"] == hex::encode(beneficiary))
+                .and_then(|r| r["name"].as_str().map(str::to_string))
+                .unwrap_or_else(|| b58(&beneficiary));
+            call["amount_display"] = json!(display::amount(total));
+            call["summary"] = json!(format!(
+                "Create a Vest schedule: {} from this account, vesting to {to}",
+                display::amount(total)
+            ));
+            call["resolved"] = json!(resolved);
+            Ok(ok(call))
+        })
+    }
+
+    fn op_call(
+        &mut self,
+        id: u64,
+        op: names_backend::NamesOp,
+        candidates: impl FnOnce(&Schedule) -> Vec<AccountId>,
+        role: &str,
+        summary: impl FnOnce(&str) -> String,
+    ) -> String {
+        self.forget_reads();
+        answer(|| {
+            if !self.names_mode() {
+                return Err(
+                    "this call is for Names Wallet; this module signs with a wallet folder".into(),
+                );
+            }
+            let schedule = self.schedule(id)?;
+            let caller = self.names_caller(&candidates(&schedule), role)?;
+            let mut call = self.names_backend()?.op_call(id, caller, &op)?;
+            let amount: u128 = call["amount"].as_str().unwrap_or("0").parse().unwrap_or(0);
+            let shown = display::amount(amount);
+            call["amount_display"] = json!(shown);
+            call["summary"] = json!(summary(&shown));
+            Ok(ok(call))
+        })
+    }
+
+    /// `propose_call` arguments that cancel schedule `id` (its cancel authority signs; what has
+    /// not vested goes back to the creator, `amount`). Reply as `create_call`'s, without the
+    /// schedule fields beyond `schedule_address`.
+    pub fn cancel_call(&mut self, id: u64) -> String {
+        self.op_call(
+            id,
+            names_backend::NamesOp::Cancel,
+            |s| vec![s.cancel_authority],
+            "cancel authority",
+            |amount| {
+                format!(
+                    "Cancel Vest schedule {id}: {amount} not yet vested goes back to its creator"
+                )
+            },
+        )
+    }
+
+    /// `propose_call` arguments that make schedule `id` irrevocable (its cancel authority or
+    /// creator signs).
+    pub fn irrevocable_call(&mut self, id: u64) -> String {
+        self.op_call(
+            id,
+            names_backend::NamesOp::MakeIrrevocable,
+            |s| vec![s.cancel_authority, s.creator],
+            "cancel authority or creator",
+            |_| {
+                format!("Make Vest schedule {id} irrevocable: it can never be cancelled after this")
+            },
+        )
+    }
+
+    /// `propose_call` arguments that signal milestone tranche `index` of schedule `id` (its
+    /// milestone authority signs; `amount` is what the tranche unlocks).
+    pub fn signal_call(&mut self, id: u64, index: u64) -> String {
+        let Ok(tranche) = u32::try_from(index) else {
+            return fail("index: too large");
+        };
+        self.op_call(id, names_backend::NamesOp::SignalMilestone(tranche), |s| vec![s.milestone_authority], "milestone authority", |amount| {
+            format!("Signal milestone {index} of Vest schedule {id}: unlocks {amount} for its beneficiary")
+        })
+    }
+
+    /// `propose_call` arguments that move schedule `id` to another beneficiary (hex, base58 or a
+    /// name; its beneficiary signs, and the schedule must be transferable).
+    pub fn transfer_call(&mut self, id: u64, new_beneficiary: &str) -> String {
+        let (to, name) = match self.resolve(new_beneficiary.trim()) {
+            Ok(found) => found,
+            Err(error) => return fail(error),
+        };
+        let shown = name.unwrap_or_else(|| b58(&to));
+        self.op_call(
+            id,
+            names_backend::NamesOp::TransferBeneficiary(to),
+            |s| vec![s.beneficiary],
+            "beneficiary",
+            |_| format!("Move Vest schedule {id} to a new beneficiary, {shown}"),
+        )
+    }
+
     /// Resolve an LNS name (or check an address): `{name, account, base58}`.
     pub fn resolve_name(&mut self, text: &str) -> String {
         answer(|| {

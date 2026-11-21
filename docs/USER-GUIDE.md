@@ -82,18 +82,18 @@ unlock to another account (with a wallet folder, for now).
 
 ## What Names Wallet can't do yet
 
-Names Wallet approves Vest's **public claims of LEZ schedules** today. Three things need more
+With Names Wallet 0.18 or later, Names Wallet approves every step of a **LEZ schedule**: creating,
+public claims, cancelling, making permanent, unlocking a milestone and transferring. (Those steps
+read the network's clock, another program's account, which Names Wallet's program calls carry
+since 0.18; Names says "Reads the network clock" when it asks you.) Two things still need more
 from Names Wallet's program calls than they carry:
 
-- **Creating, cancelling, making permanent, unlocking a milestone, transferring**: the Vest
-  program reads the network's clock in the same step, and that clock is another program's
-  account; Names Wallet's `propose_call` reaches only Vest's own accounts and LEZ balances.
 - **Claiming a token schedule**: the claim moves the token through the token program's accounts,
-  which `propose_call` can't name either.
+  which `propose_call` can't name.
 - **A private claim**: it needs your public account to sign while a private account of yours
   receives, in one transaction; Names Wallet's private calls sign nothing public.
 
-Until then, Vest can sign itself with a **wallet folder** (Settings, Advanced): a LEZ wallet made
+For those, Vest can sign itself with a **wallet folder** (Settings, Advanced): a LEZ wallet made
 with the LEZ wallet's command line (`wallet_config.json` and `storage.json`). Everything above
 then works from Vest, and the same steps apply without the Names approvals.
 
