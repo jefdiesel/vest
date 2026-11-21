@@ -771,6 +771,13 @@ export function nextLine(action, info) {
     return ""
 }
 
+/// What a Names write is called in its status line ("the cancel"), from the view's step name.
+export function writeWhat(what) {
+    var kind = String(what || "").split(":")[0]
+    var words = { create: "the new schedule", cancel: "the cancel", irrevocable: "making it permanent", signal: "the milestone", transfer: "the transfer" }
+    return words[kind] || "the request"
+}
+
 /// The full guide (the repository's user guide).
 export const GUIDE_URL = "https://github.com/jefdiesel/vest/blob/main/docs/USER-GUIDE.md"
 

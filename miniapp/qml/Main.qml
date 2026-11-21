@@ -37,9 +37,13 @@ Item {
     property string namesProblem: ""
     property var accessRequest: null           // the connect request while it waits
     property var claimRequest: null            // the claim request while it waits
+    property var writeRequest: null            // a create, cancel, permanent, milestone or transfer while it waits
+    property bool namesCanCall: false          // Names Wallet 0.18+: its calls may read the network clock
     property var granted: null
     property var balances: []
     readonly property bool connected: walletMode ? chainOpen : (namesState === "connected" && chainOpen)
+    // Who signs creates, cancels, milestones and transfers: the wallet folder, or Names Wallet 0.18+.
+    readonly property bool canWrite: walletMode || namesCanCall
 
     // ── View state ──────────────────────────────────────────────────────────────────
     property string tab: "receive"             // receive | pay | settings
@@ -157,6 +161,7 @@ Item {
     /// Where Names Wallet stands: installed and open, on our network, and which accounts it gave.
     function readNames() {
         namesCall("get_config", [], function(config) {
+            root.namesCanCall = ((config && config.features) || []).indexOf("call_reads_clock") >= 0
             var zone = Logic.zoneProblem(config, info && info.network ? info.network.chain_id : "")
             if (zone !== "") { namesState = "otherZone"; namesProblem = zone; loading = false; return }
             namesCall("granted_accounts", [], function(g) {
@@ -440,6 +445,13 @@ Item {
     function doTransfer(id, target) {
         var typed = Logic.accountInput(target)
         if (!typed.ok) { say("Enter the new beneficiary's address or LNS name.", true); return }
+        if (!walletMode) {
+            namesWrite("transfer", "transfer_call", [String(id), typed.account], function() {
+                transferField.text = ""
+                say("Schedule " + id + " now goes to " + typed.account + ".", false, Logic.nextLine("transfer"))
+            })
+            return
+        }
         write("transfer", "transfer_beneficiary", [String(id), typed.account], function(r) {
             if (!r.ok) { say(r.error, true); return }
             transferField.text = ""
@@ -460,6 +472,41 @@ Item {
             cancelable: cCancelable, transferable: cTransferable,
             cancelAuthority: cancelAuthField.text.trim(), milestoneAuthority: milestoneAuthField.text.trim()
         }
+    }
+
+    /// A change signed through Names Wallet: the module builds the call (`<method>` → {program,
+    /// accounts_json, instruction_hex, summary, caller}), Names shows it and the person approves,
+    /// choosing `caller`. `done(built, status)` runs once Names says it was sent.
+    function namesWrite(what, method, args, done) {
+        say("")
+        busy = true
+        workingOn = what
+        call(method, args, function(r) {
+            if (!r.ok) { busy = false; workingOn = ""; say(r.error, true); return }
+            namesCall("propose_call", [r.program, r.accounts_json, r.instruction_hex, r.summary], function(v) {
+                writeRequest = { request: v.request, built: r, done: done, what: Logic.writeWhat(what) }
+                say("In Names Wallet, choose " + Logic.labelled(r.caller, root.names) + " and approve. You come back here after.")
+                pollWrite.start()
+                openNames()
+            }, function(e) { busy = false; workingOn = ""; say(e.error, true) })
+        }, 120000)
+    }
+
+    Timer {
+        id: pollWrite
+        interval: 2000
+        repeat: true
+        onTriggered: root.namesCall("request_status", [root.writeRequest.request], function(v) {
+            if (Logic.requestOpen(v)) return
+            pollWrite.stop()
+            var w = root.writeRequest
+            root.writeRequest = null
+            root.busy = false
+            root.workingOn = ""
+            if (v.state === "done") w.done(w.built, v)
+            else root.say(Logic.requestLine(v, w.what), v.state === "failed")
+            root.refresh()
+        }, function(e) { pollWrite.stop(); root.writeRequest = null; root.busy = false; root.workingOn = ""; root.say(e.error, true) })
     }
 
     /// Look up what was typed in the payout box (an LNS name or an address) and say who it is.
@@ -484,6 +531,18 @@ Item {
         p.tranches = cKind === "milestone" ? cTranches.map(amountOf) : []
         var v = Logic.validateCreate(p)
         if (!v.ok) { say(v.errors[0], true); return }
+        if (!walletMode) {
+            namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
+                justCreated = true
+                call("import_schedule", [built.schedule_address], function(imp) {
+                    var id = imp.ok ? imp.id : ""
+                    say(Logic.resolvedLines(built.resolved).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
+                        false, Logic.nextLine("create", { id: id }))
+                    refresh()
+                }, 60000)
+            })
+            return
+        }
         write("create", "create", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(r) {
             if (!r.ok) { say(r.error, true); return }
             justCreated = true
@@ -519,6 +578,17 @@ Item {
     function doGrave() {
         var k = sheet.kind, s = sheet.schedule
         sheet = null
+        if (!walletMode) {
+            if (k === "cancel")
+                namesWrite("cancel:" + s.id, "cancel_call", [String(s.id)], function(built) {
+                    say("Cancelled schedule " + s.id + ". " + built.amount_display + " went back to the creator.", false, Logic.nextLine("cancel"))
+                })
+            else
+                namesWrite("irrevocable:" + s.id, "irrevocable_call", [String(s.id)], function() {
+                    say("Schedule " + s.id + " is now permanent.", false, Logic.nextLine("irrevocable"))
+                })
+            return
+        }
         if (k === "cancel")
             write("cancel:" + s.id, "cancel", [String(s.id)], function(r) {
                 if (!r.ok) { say(r.error, true); return }
@@ -532,6 +602,12 @@ Item {
     }
 
     function doSignal(s, index) {
+        if (!walletMode) {
+            namesWrite("signal:" + s.id + ":" + index, "signal_call", [String(s.id), String(index)], function(built) {
+                say("Unlocked milestone " + (index + 1) + " of schedule " + s.id + ": " + built.amount_display + ".", false, Logic.nextLine("signal"))
+            })
+            return
+        }
         write("signal:" + s.id + ":" + index, "signal_milestone", [String(s.id), String(index)], function(r) {
             if (!r.ok) { say(r.error, true); return }
             say("Unlocked milestone " + (index + 1) + " of schedule " + s.id + ": " + r.amount_display + ".", false, Logic.nextLine("signal"))
@@ -639,7 +715,7 @@ Item {
                                     : step.modelData.detail
                             }
                             Body {
-                                visible: step.now && step.modelData.n === 2 && root.guideRole === "pay" && !root.walletMode && root.connected
+                                visible: step.now && step.modelData.n === 2 && root.guideRole === "pay" && !root.canWrite && root.connected
                                 text: "Not with Names Wallet yet: it can approve claims, but not a new schedule. To pay out today, use a wallet folder (Settings, Advanced)."
                             }
                             RowLayout {
@@ -776,7 +852,7 @@ Item {
             }
 
             Card {
-                visible: root.tab === "receive" && root.walletMode && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
+                visible: root.tab === "receive" && root.canWrite && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
                 Heading { text: "Hand this schedule to someone else" }
                 Body { text: "This schedule was made transferable: what is still to vest can go to another account." }
                 Field { id: transferField; look: root.look; Layout.fillWidth: true; hint: "New beneficiary: address or LNS name" }
@@ -822,7 +898,7 @@ Item {
             }
 
             Card {
-                visible: root.tab === "pay" && !root.walletMode && root.connected
+                visible: root.tab === "pay" && !root.canWrite && root.connected
                 Heading { text: "Paying out with Names Wallet: not yet" }
                 Body { text: Logic.NAMES_CANT_PAY }
                 Link { look: root.look; text: "Use a wallet folder instead"; onPressed: root.tab = "settings" }
@@ -964,11 +1040,15 @@ Item {
                 Body {
                     visible: !root.walletMode
                     color: look.ink
-                    text: "Create is off for now: Names Wallet can't sign a new schedule yet (that update is being built). To pay out today, use a wallet folder: Settings, Advanced."
+                    text: !root.namesCanCall
+                        ? "Create needs Names Wallet 0.18 or later, which can sign a new schedule. Update Names, or use a wallet folder: Settings, Advanced."
+                        : root.batchMode
+                            ? "Several people in one transaction needs a wallet folder for now (Settings, Advanced). One person at a time works with Names Wallet."
+                            : "Names Wallet opens with the schedule: choose the account that pays and approve. You come back here after."
                 }
                 Action {
                     look: root.look; strong: true; changes: true; busy: root.busy
-                    enabledNow: root.walletMode
+                    enabledNow: root.walletMode || (root.namesCanCall && !root.batchMode)
                     label: root.batchMode ? "Create " + root.rowCount + " schedules" : "Create schedule"
                     busyLabel: "Creating…"; working: root.workingOn === "create" || root.workingOn === "batch"
                     onPressed: root.batchMode ? root.doBatch() : root.doCreate()
@@ -976,7 +1056,7 @@ Item {
             }
 
             Card {
-                visible: root.tab === "pay" && root.walletMode && root.mySchedules.length === 0 && root.chainOpen
+                visible: root.tab === "pay" && root.canWrite && root.mySchedules.length === 0 && root.chainOpen
                 Heading { text: "Nothing paid out yet" }
                 Body { text: "Schedules you create appear here, with buttons to cancel them, make them permanent, or unlock a milestone." }
             }
@@ -998,7 +1078,7 @@ Item {
                                 + (managed.modelData.cancelled ? " · cancelled" : Logic.isFullyClaimed(managed.modelData) ? " · fully claimed" : managed.modelData.cancelable ? "" : " · permanent")
                         }
                         Flow {
-                            visible: root.walletMode && !Logic.isClosed(managed.modelData)
+                            visible: root.canWrite && !Logic.isClosed(managed.modelData)
                             Layout.fillWidth: true
                             spacing: 8
                             Action {

@@ -204,6 +204,7 @@ check("payee: a name shows who and the address", L.payeeLine("alice", { ok: true
 check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error: "unknown LNS name: nobdy" }).text.startsWith("No one holds the LNS name nobdy"), true);
 check("payee: a name with no account says so", L.payeeLine("jefdiesel", { ok: false, error: "LNS name 'jefdiesel' publishes no account to pay" }).text.startsWith("Can't pay jefdiesel by name yet"), true);
 check("payee: an address is shown back", L.payeeLine("x", { ok: true, base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).text.startsWith("Pays the address"), true);
+check("names write words", [L.writeWhat("create"), L.writeWhat("cancel:3"), L.writeWhat("signal:3:1"), L.writeWhat("x")], ["the new schedule", "the cancel", "the milestone", "the request"]);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);

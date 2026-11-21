@@ -113,6 +113,8 @@ SCENARIOS = {
                  "root.tab = 'pay'; beneficiaryField.text = 'alice'; root.checkPayee(); page.contentY = 560"),
     "payee-unknown": ({"settings": WALLET, "resolve_name": {"ok": False, "error": "unknown LNS name: alcie"}}, {},
                  "root.tab = 'pay'; beneficiaryField.text = 'alcie'; root.checkPayee(); page.contentY = 560"),
+    "create-names-018": ({"settings": NAMES_SETTINGS}, {"get_config": dict(CONFIG, features=["call_reads_clock"]), "granted_accounts": GRANTED, "account_balances": []},
+                         "root.guideOpen = false; root.tab = 'pay'; page.contentY = page.contentHeight - page.height"),
     "create-names": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'pay'"),
     "confirm-cancel": ({"settings": WALLET}, {}, "root.tab = 'pay'; root.askGrave('cancel', root.mySchedules[0])"),
     "settings": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'settings'"),
