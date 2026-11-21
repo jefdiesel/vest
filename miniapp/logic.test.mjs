@@ -209,7 +209,7 @@ check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.ne
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has vested to you\./.test(qml)], [false, false, true]);
   check("names calls pass text only", [...qml.matchAll(/namesCall\("(\w+)",\s*(\[[^\]]*\])/g)].filter(m => /Number\(/.test(m[2])).map(m => m[1]), []);
-  check("first run asks to connect Names Wallet, not for a wallet folder", [/label: "Connect Names Wallet"/.test(qml), /Advanced: a wallet folder/.test(qml)], [true, true]);
+  check("first run asks to connect Names Wallet, not for a wallet folder", [/What do you want to do\?/.test(qml) && /label: "Connect"/.test(qml), /Advanced: a wallet folder/.test(qml)], [true, true]);
 }
 
 // ── QML hygiene (as basecamp/logic.test.mjs) ───────────────────────────────────────
