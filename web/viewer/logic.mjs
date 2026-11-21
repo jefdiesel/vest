@@ -108,7 +108,7 @@ function decodeCoreEvent(reader) {
   const tag = reader.u8();
   if (tag === 0) {
     const value = {
-      name: 'Created', creator: reader.id(), beneficiary: reader.id(), token: reader.hex32(),
+      name: 'Schedule created', creator: reader.id(), beneficiary: reader.id(), token: reader.hex32(),
       total: reader.u128(), ...decodeKind(reader), cancelable: reader.bool(), transferable: reader.bool(),
       cancelAuthority: reader.id(), milestoneAuthority: reader.id(), at: reader.u64(),
     };
@@ -118,10 +118,10 @@ function decodeCoreEvent(reader) {
   if (tag === 2) return { name: 'Cancelled', vestedAtCancel: reader.u128(), refund: reader.u128(), at: reader.u64() };
   if (tag === 3) {
     const index = Number(reader.u8()) | (Number(reader.u8()) << 8); // u16 LE
-    return { name: 'MilestoneSignalled', index, amount: reader.u128(), at: reader.u64() };
+    return { name: 'Milestone unlocked', index, amount: reader.u128(), at: reader.u64() };
   }
-  if (tag === 4) return { name: 'BeneficiaryTransferred', old: reader.id(), new: reader.id(), at: reader.u64() };
-  if (tag === 5) return { name: 'MadeIrrevocable', at: reader.u64() };
+  if (tag === 4) return { name: 'Person receiving changed', old: reader.id(), new: reader.id(), at: reader.u64() };
+  if (tag === 5) return { name: 'Made permanent', at: reader.u64() };
   throw new Error(`unknown event tag ${tag}`);
 }
 
@@ -170,28 +170,28 @@ export function lockedAt(schedule, now) {
 
 /** Next unlock: { at: bigint|null, text } — null when nothing more will unlock. */
 export function nextUnlock(schedule, now) {
-  if (!schedule || schedule.cancelled) return { at: null, text: 'cancelled — nothing further vests' };
+  if (!schedule || schedule.cancelled) return { at: null, text: 'cancelled — nothing further unlocks' };
   if (schedule.kind === 'milestone') {
     for (let index = 0; index < schedule.tranches.length; index += 1) {
       const word = Math.floor(index / 64), bit = BigInt(index % 64);
       if (!((schedule.signalled[word] ?? 0n) & (1n << bit))) {
-        return { at: null, text: `milestone ${index + 1} awaits the authority's signal` };
+        return { at: null, text: `milestone ${index + 1} is waiting to be unlocked` };
       }
     }
-    return { at: null, text: 'all milestones signalled' };
+    return { at: null, text: 'all milestones unlocked' };
   }
   const nowBig = BigInt(now);
   if (schedule.kind === 'cliff-linear' && nowBig < BigInt(schedule.cliff)) {
     return { at: BigInt(schedule.cliff), text: 'cliff' };
   }
-  if (nowBig >= BigInt(schedule.end)) return { at: null, text: 'fully vested' };
+  if (nowBig >= BigInt(schedule.end)) return { at: null, text: 'fully unlocked' };
   // claimable_at is monotone: binary search the first time it becomes positive (as core does).
   let low = nowBig + 1n, high = BigInt(schedule.end);
   while (low < high) {
     const mid = low + (high - low) / 2n;
     if (claimableAt(schedule, mid) > 0n) high = mid; else low = mid + 1n;
   }
-  return { at: low, text: 'linear accrual' };
+  return { at: low, text: 'unlocking evenly' };
 }
 
 // ── presentation ─────────────────────────────────────────────────────────────────────
@@ -227,5 +227,5 @@ export function classifyInput(text) {
   const value = String(text ?? '').trim();
   if (/^[a-z0-9-]{1,32}$/.test(value)) return { type: 'name', value };
   if (base58Decode(value)?.length === 32) return { type: 'account', value };
-  throw new Error('enter a 32-byte account id (base58) or an LNS name');
+  throw new Error('Enter an address or an LNS name.');
 }

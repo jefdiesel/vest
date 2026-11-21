@@ -145,7 +145,7 @@ Item {
     /// brings them back once they answer.
     function connectNames() {
         say("")
-        wallet.connect("To show your vesting schedules and claim what has vested to you", {}, {
+        wallet.connect("To show your schedules and claim what has unlocked for you", {}, {
             waiting: function(v) { root.accessRequest = v },
             done: function(v) {
                 root.accessRequest = null
@@ -316,7 +316,7 @@ Item {
                 root.claimRequest = null
                 root.claimWatch = null
                 root.confirm = null
-                if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · tx " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
+                if (v.state === "done") root.say("Claimed " + (v.amountDisplay || "") + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + ".", false, Logic.nextLine("claim"))
                 else root.say(Logic.requestLine(v, "the claim"), v.state === "failed")
                 root.refresh()
             },
@@ -330,7 +330,7 @@ Item {
 
     function doTransfer(id, target) {
         var typed = Logic.accountInput(target)
-        if (!typed.ok) { say("Enter the new beneficiary's address or LNS name.", true); return }
+        if (!typed.ok) { say("Enter the address or LNS name of the person receiving.", true); return }
         namesWrite("transfer", "transfer_call", [String(id), typed.account], function() {
             transferField.text = ""
             say("Schedule " + id + " now goes to " + typed.account + ".", false, Logic.nextLine("transfer"))
@@ -420,7 +420,7 @@ Item {
             justCreated = true
             call("import_schedule", [built.schedule_address], function(imp) {
                 var id = imp.ok ? imp.id : ""
-                say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · tx " + Logic.short(v.tx) : "") + "."]).join(" "),
+                say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + "."]).join(" "),
                     false, Logic.nextLine("create", { id: id }))
                 refresh()
             }, 60000)
@@ -472,7 +472,7 @@ Item {
                 PageHeader {
                     look: root.look
                     title: "Vest"
-                    sentence: "Pay tokens out over time, or claim what has vested to you."
+                    sentence: "Pay tokens out over time, or claim what has unlocked for you."
                     runsOnPrefix: "Runs on"
                     network: root.networkName !== "" ? Logic.clean(root.networkName) : ""
                     networkDetail: root.info && root.info.network && root.info.network.rpc ? Logic.hostOf(root.info.network.rpc) : ""
@@ -576,7 +576,7 @@ Item {
                 RowLayout {
                     Layout.topMargin: 4
                     spacing: 20
-                    Action { look: root.look; label: "Got it"; visible: root.connected; onPressed: root.finishGuide() }
+                    Action { look: root.look; label: "Hide the steps"; visible: root.connected; onPressed: root.finishGuide() }
                     Link { look: root.look; text: "Read the full guide"; onPressed: Qt.openUrlExternally(Logic.GUIDE_URL) }
                 }
             }
@@ -623,7 +623,7 @@ Item {
                 FactRow {
                     look: root.look; key: "Claimable now"
                     visible: !!root.selected && (!Logic.isClosed(root.selected) || Logic.above(root.selected.claimable || "0", "0"))
-                    value: root.selected ? root.selected.claimable_display + (root.selected.cancelled ? " (vested before the cancel)" : "") : ""
+                    value: root.selected ? root.selected.claimable_display + (root.selected.cancelled ? " (unlocked before the cancel)" : "") : ""
                 }
                 FactRow { look: root.look; key: "Claimed"; value: root.selected ? root.selected.claimed_display + (root.selected.cancelled ? "" : " of " + root.selected.total_display) : "" }
                 FactRow { look: root.look; key: "Still locked"; visible: !!root.selected && !Logic.isClosed(root.selected); value: root.selected ? root.selected.locked_display : "" }
@@ -655,7 +655,7 @@ Item {
                 Sheet {
                     visible: root.confirm !== null
                     Heading { text: root.confirm ? "Claim " + root.confirm.amountDisplay + "?" : "" }
-                    FactRow { look: root.look; key: "To"; value: root.confirm ? Logic.labelled(root.confirm.destAccount, root.names) + " (public)" : "" }
+                    FactRow { look: root.look; key: "Receives"; value: root.confirm ? Logic.labelled(root.confirm.destAccount, root.names) + " (public)" : "" }
                     FactRow { look: root.look; key: "Network fee"; value: "shown by Names Wallet before you approve" }
                     Body { text: root.confirm ? root.confirm.fee.message : ""; color: root.confirm && !root.confirm.fee.ok ? look.alarm : look.dim }
                     Body { visible: root.claimRequest !== null; text: Logic.requestLine(root.claimRequest, "the claim"); color: look.ink }
@@ -677,8 +677,8 @@ Item {
             Card {
                 visible: root.tab === "receive" && root.canWrite && root.selected !== null && root.selected.transferable && !Logic.isClosed(root.selected)
                 Heading { text: "Hand this schedule to someone else" }
-                Body { text: "This schedule was made transferable: what is still to vest can go to another account." }
-                Field { id: transferField; look: root.look; Layout.fillWidth: true; hint: "New beneficiary: address or LNS name" }
+                Body { text: "This schedule was made transferable: what is still locked can go to another account." }
+                Field { id: transferField; look: root.look; Layout.fillWidth: true; hint: "Who receives it: address or LNS name" }
                 Action {
                     look: root.look; changes: true; busy: root.busy
                     label: "Transfer schedule"; busyLabel: "Transferring…"; working: root.workingOn === "transfer"
@@ -698,7 +698,7 @@ Item {
                 look: root.look
                 summary: root.selected && root.selected.address ? "Schedule " + Logic.short(root.selected.address) : ""
                 FactRow { look: root.look; key: "Schedule address"; value: root.selected && root.selected.address ? root.selected.address : ""; monospace: true }
-                FactRow { look: root.look; key: "Beneficiary"; value: root.selected ? root.selected.beneficiary : ""; monospace: true }
+                FactRow { look: root.look; key: "Receives"; value: root.selected ? root.selected.beneficiary : ""; monospace: true }
                 FactRow { look: root.look; key: "Creator"; value: root.selected ? root.selected.creator : ""; monospace: true }
                 FactRow { look: root.look; key: "Token"; value: root.selected ? root.selected.token : ""; monospace: true }
                 FactRow { look: root.look; key: "Amounts (base units)"; value: root.selected ? "total " + root.selected.total + " · claimed " + root.selected.claimed + " · claimable " + root.selected.claimable : ""; monospace: true }
@@ -746,7 +746,7 @@ Item {
                 Label { text: "How it unlocks" }
                 RowLayout {
                     spacing: 8
-                    ChoiceInline { label: "Evenly over time"; chosen: root.cKind === "linear"; onPressed: root.cKind = "linear" }
+                    ChoiceInline { label: "Evenly"; chosen: root.cKind === "linear"; onPressed: root.cKind = "linear" }
                     ChoiceInline { label: "Cliff, then evenly"; chosen: root.cKind === "cliff-linear"; onPressed: root.cKind = "cliff-linear" }
                     ChoiceInline { label: "Milestones"; chosen: root.cKind === "milestone"; onPressed: root.cKind = "milestone" }
                 }
@@ -796,7 +796,7 @@ Item {
                                 text: root.cTranches[index]
                                 onTextChanged: root.cTranches[index] = text
                             }
-                            Link { look: root.look; visible: root.trancheCount > 1; text: "Remove"; onPressed: { root.cTranches.splice(index, 1); root.trancheCount = root.cTranches.length } }
+                            Link { look: root.look; visible: root.trancheCount > 1; text: "Remove milestone"; onPressed: { root.cTranches.splice(index, 1); root.trancheCount = root.cTranches.length } }
                         }
                     }
                     Link { look: root.look; visible: root.cKind === "milestone"; text: "Add a milestone"; onPressed: { root.cTranches.push(""); root.trancheCount = root.cTranches.length } }
@@ -822,7 +822,7 @@ Item {
                 Body {
                     color: look.ink
                     text: !root.namesCanCall
-                        ? "Create needs Names Wallet 0.18 or later, which can sign a new schedule. Update Names, then come back."
+                        ? "Create needs Names Wallet 0.18 or later, which can sign a new schedule. Update Names Wallet, then come back."
                         : "Names Wallet opens with the schedule: choose the account that pays and approve. You come back here after."
                 }
                 Action {
@@ -853,7 +853,7 @@ Item {
                         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: look.line }
                         Text { textFormat: Text.PlainText; Layout.fillWidth: true; text: Logic.scheduleTitle(managed.modelData); color: look.ink; font.family: look.sans; font.pixelSize: look.px(16); font.weight: Font.DemiBold }
                         Body {
-                            text: "To " + Logic.labelled(managed.modelData.beneficiary, root.names) + " · claimed " + managed.modelData.claimed_display
+                            text: "Receives " + Logic.labelled(managed.modelData.beneficiary, root.names) + " · claimed " + managed.modelData.claimed_display
                                 + (managed.modelData.cancelled ? " · cancelled" : Logic.isFullyClaimed(managed.modelData) ? " · fully claimed" : managed.modelData.cancelable ? "" : " · permanent")
                         }
                         Flow {
@@ -892,7 +892,7 @@ Item {
             Card {
                 visible: root.tab === "settings"
                 Heading { text: "Signing" }
-                Body { text: "Vest signs through Names Wallet: you approve every payment and claim in the Names app. Vest has no signer of its own." }
+                Body { text: "Vest signs through Names Wallet: you approve every payment and claim in Names Wallet. Vest has no signer of its own." }
                 FactRow { look: root.look; visible: wallet.current !== null; key: "Wallet"; value: wallet.current ? Logic.clean(wallet.current.display_name) + " (" + Logic.clean(wallet.current.module) + ")" : "" }
                 Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
                 Link { look: root.look; visible: wallet.wallets.length > 1; text: "Use another wallet"; onPressed: { wallet.forgetWallet(); root.refresh() } }

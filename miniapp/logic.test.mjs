@@ -64,14 +64,14 @@ check("BigInt path == QML limb fallback", triples.map(x => L.mulDivFloorString(.
 // ── Next unlock ───────────────────────────────────────────────────────────────────────
 const nu = L.nextUnlock(CLIFF, NOW);
 check("next unlock: date + in 3 days", [nu.at, L.dateText(nu.at), /in 3 days/.test(nu.text), /Cliff on/.test(nu.text)], [CLIFF.cliff, "2026-11-23", true, true]);
-check("next unlock: milestone has no date", [/tranche 3/.test(L.nextUnlock(MILE, NOW).text), L.nextUnlock(MILE, NOW).at], [true, 0]);
-check("next unlock: all signalled", L.nextUnlock({ ...MILE, signalled: [true, true, true, true] }, NOW).text, "All milestones signalled.");
+check("next unlock: milestone has no date", [/milestone 3/.test(L.nextUnlock(MILE, NOW).text), L.nextUnlock(MILE, NOW).at], [true, 0]);
+check("next unlock: all unlocked", L.nextUnlock({ ...MILE, signalled: [true, true, true, true] }, NOW).text, "All milestones unlocked.");
 
 // ── Accounts (addresses or LNS names; the module resolves names) ───────────────────
 const HEXID = "0a".repeat(32);
 check("account kinds", [L.accountKind("Public/" + ID), L.accountKind("Private/" + ID), L.accountKind(HEXID), L.accountKind(ID), L.accountKind("alice"), L.accountKind("not an account!")], ["base58", "base58", "hex", "base58", "name", ""]);
 check("account: names and addresses pass", [L.problemAccount("alice"), L.problemAccount(HEXID), L.problemAccount("Private/" + ID)], ["", "", ""]);
-check("account: junk and empty refused", [/not an account/.test(L.problemAccount("b@d!")), /Enter/.test(L.problemAccount("  "))], [true, true]);
+check("account: junk and empty refused", [/not an address/.test(L.problemAccount("b@d!")), /Enter/.test(L.problemAccount("  "))], [true, true]);
 check("account: bad base58 after a prefix refused", L.problemAccount("Public/bad!0OIl") !== "", true);
 
 // ── Creation validation ───────────────────────────────────────────────────────────────
@@ -141,9 +141,9 @@ check("cancelled and claimed out", [L.rowState({ ...CANCELLED, claimable: "0" })
 const DONE = { id: 1, total: "500", claimed: "500", claimable: "0", claimable_display: "0 LEZ" };
 check("fully claimed: status line and row", [L.statusLine(DONE), L.rowState(DONE), L.isClosed(DONE), L.isFinished(DONE)], ["Fully claimed.", "Fully claimed", true, true]);
 check("a live schedule has no status line", [L.statusLine({ total: "10", claimed: "1", claimable: "2", claimable_display: "2 LEZ" }), L.rowState({ total: "10", claimed: "1", claimable: "2", claimable_display: "2 LEZ" })], ["", "2 LEZ to claim"]);
-check("confirm sheet: cancel", L.confirmText("cancel", { id: 0, locked_display: "0.000347 LEZ" }), "Cancel schedule 0? The unvested 0.000347 LEZ goes back to you. This can't be undone.");
+check("confirm sheet: cancel", L.confirmText("cancel", { id: 0, locked_display: "0.000347 LEZ" }), "Cancel schedule 0? The locked amount 0.000347 LEZ goes back to you. This can't be undone.");
 check("confirm sheet: irrevocable", /can't be undone/.test(L.confirmText("irrevocable", { id: 2 })), true);
-check("scheduleTitle", L.scheduleTitle({ id: 3, kind: "cliff-linear", total_display: "1.5 LEZ" }), "Schedule 3 · cliff, then linear · 1.5 LEZ");
+check("scheduleTitle", L.scheduleTitle({ id: 3, kind: "cliff-linear", total_display: "1.5 LEZ" }), "Schedule 3 · cliff, then evenly · 1.5 LEZ");
 check("clean and hostOf", [L.clean("a\u202eb\u0007c"), L.hostOf("https://lez.nameswallet.app/"), L.hostOf("http://127.0.0.1:3071")], ["abc", "lez.nameswallet.app", "127.0.0.1:3071"]);
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
@@ -201,7 +201,7 @@ check("timelines", [L.timeline("linear").length, L.timeline("cliff-linear")[1].k
 check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. Send them its address or your LNS name so they can find it in Vest.", true, ""]);
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
-  check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has vested to you\./.test(qml)], [false, false, true]);
+  check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has unlocked for you\./.test(qml)], [false, false, true]);
   check("the wallet only through the SDK, never named: no module calls to it, no \"names\" in Vest", [/callModuleAsync\("names"/.test(qml), /"names"/.test(qml.replace('signer: "names"', "")), /NamesWallet \{ id: wallet; app: "vesting_ui"/.test(qml), /wallet\.(connect|proposeCall|withdraw|resolve|check|disconnect|chooseWallet)\(/.test(qml)], [false, false, true, true]);
   check("names calls pass text only", [...qml.matchAll(/wallet\.\w+\(([^)]*)\)/g)].filter(m => /Number\(/.test(m[1])).map(m => m[0]), []);
   check("first run asks to connect Names Wallet; no wallet folder anywhere", [/What do you want to do\?/.test(qml) && /label: "Connect"/.test(qml), /wallet folder|wallet_dir|password|passwordField/i.test(qml)], [true, false]);
@@ -277,13 +277,13 @@ check("inText: one millisecond under a day", L.inText(DAY - 1, NOW), "in 1 day")
 // nextUnlock: the end boundary and a row with no dates.
 check("nextUnlock: at the end there is nothing left", [
   L.nextUnlock(LINEAR, LINEAR.end).at, L.nextUnlock(LINEAR, LINEAR.end).text
-], [0, "Fully vested — nothing left to unlock."]);
-check("nextUnlock: a row with no dates", L.nextUnlock({}, NOW).text, "Fully vested — nothing left to unlock.");
+], [0, "Fully unlocked — nothing left to unlock."]);
+check("nextUnlock: a row with no dates", L.nextUnlock({}, NOW).text, "Fully unlocked — nothing left to unlock.");
 // Fixed (found by these tests):
 check("nextUnlock: fewer signals than tranches", [
   L.nextUnlock({ ...MILE, signalled: [] }, NOW).text,
   L.nextUnlock({ ...MILE, signalled: [true] }, NOW).text
-], ["Next unlock: tranche 1 — signalled by the creator.", "Next unlock: tranche 2 — signalled by the creator."]);
+], ["Next unlock: milestone 1 — when the creator says it's reached.", "Next unlock: milestone 2 — when the creator says it's reached."]);
 
 // Fee coverage and payer names not reached by the existing feeCheck assertions.
 
@@ -332,10 +332,10 @@ check("nextLine: every remaining action", [
 ], [
   "The schedules are live. Send each person their schedule's address or your LNS name.",
   "The tokens are in your account. Come back when more unlocks (in 3 days).",
-  "Nothing more unlocks. What had already vested stays theirs to claim.",
+  "Nothing more unlocks. What had already unlocked stays theirs to claim.",
   "Nobody can cancel it any more; it runs to the end.",
   "They can claim that part now.",
-  "The new beneficiary claims from now on; send them the schedule's address.",
+  "The person receiving claims from now on; send them the schedule's address.",
   "Connected. Your schedules are below; if someone sent you one, paste its address."
 ]);
 check("writeWhat: the other write names", [L.writeWhat("irrevocable:3"), L.writeWhat("transfer:3")], ["making it permanent", "the transfer"]);
