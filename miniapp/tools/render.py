@@ -119,6 +119,8 @@ SCENARIOS = {
                 "root.tab = 'pay'; root.cKind = 'linear'; startField.show(); page.contentY = 560"),
     "picker-cliff": ({"settings": DONE_GUIDE}, WALLET_ON,
                 "root.tab = 'pay'; root.cKind = 'cliff-linear'; endField.show(); page.contentY = 560"),
+    "picker-done": ({"settings": DONE_GUIDE}, WALLET_ON,
+                "root.tab = 'pay'; root.cKind = 'linear'; startField.show(); startField.done(); endField.show(); endField.shiftMonth(1); endField.done(); page.contentY = 560"),
     "create-names": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'pay'"),
     "confirm-cancel": ({"settings": DONE_GUIDE}, WALLET_ON, "root.tab = 'pay'; root.askGrave('cancel', root.mySchedules[0])"),
     "settings": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, "root.tab = 'settings'"),

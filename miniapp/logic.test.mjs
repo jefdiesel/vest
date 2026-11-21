@@ -430,3 +430,10 @@ check("atLocal and partsOf round-trip a local moment", L.partsOf(L.atLocal(2026,
     [/^Sat 21 Nov 2026 · 09:00 \(your time(, .+)?\)$/.test(text), L.dateTimeText(-1), L.dateTimeText(null)],
     [true, "", ""]);
 }
+
+// QML's int is 32-bit: a time in milliseconds held in one wraps to 1970. Times must be real.
+{
+  const src = readFileSync(new URL("./qml/kit/DateTimeField.qml", import.meta.url), "utf8") + readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  const bad = (src.match(/property int (ms|picked|today|[a-zA-Z]*(Ms|Time))\b/g) || []);
+  check("no time in milliseconds is held in a 32-bit int property", bad, []);
+}

@@ -10,7 +10,7 @@ Item {
     id: field
     property Look look: Look {}
     property string hint: ""
-    property int ms: -1                 // epoch ms, or -1 for empty (two-way)
+    property real ms: -1                 // epoch ms, or -1 for empty (two-way)
     property bool open: false
     signal changed()
 
@@ -126,8 +126,8 @@ Item {
         property int day: 1
         property int hour: 9
         property int minute: 0
-        readonly property int picked: Logic.atLocal(year, month, day, 0, 0)
-        readonly property int today: {
+        readonly property real picked: Logic.atLocal(year, month, day, 0, 0)
+        readonly property real today: {
             var d = new Date()
             return Logic.atLocal(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0)
         }
