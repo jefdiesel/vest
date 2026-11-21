@@ -278,7 +278,7 @@ impl Module {
                     ));
                 }
             }
-            let wallet_dir = self.settings.wallet_dir.trim();
+            let wallet_dir = self.settings.wallet_dir.trim().to_string();
             if wallet_dir.is_empty() {
                 return Err("set the wallet folder (a LEZ rc3 wallet) in Settings".into());
             }
@@ -291,7 +291,7 @@ impl Module {
             let via = self.rpc_url(&net.rpc)?;
             let mut backend = vesting_sdk::LezBackend::open_with_password(
                 &via,
-                Path::new(wallet_dir),
+                Path::new(&wallet_dir),
                 program,
                 clock_elf,
                 &self.dir.join("vesting-lez-ids.json"),
