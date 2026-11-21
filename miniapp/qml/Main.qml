@@ -132,17 +132,26 @@ Item {
         logos.callModuleAsync("names", method, args, function(raw) {
             var r = Logic.namesReply(raw)
             if (r.ok) { done(r.value); return }
-            if (r.busy && n < 5) { retry.schedule(function() { root.namesCall(method, args, done, failed, n + 1) }, 1500 * (n + 1)); return }
+            if (r.busy && n < 5) { root.later(function() { root.namesCall(method, args, done, failed, n + 1) }, 1500 * (n + 1)); return }
             if (r.missing) { root.namesState = "missing"; root.namesProblem = r.error }
             no(r)
         }, 30000)
     }
 
-    Timer {
-        id: retry
-        property var then: null
-        function schedule(f, ms) { then = f; interval = ms; restart() }
-        onTriggered: if (then) then()
+    /// Run `f` once after `ms`. Each call gets its own timer: two busy Names calls retrying at the
+    /// same time each come back (one shared timer kept only the last).
+    function later(f, ms) {
+        var t = oneShot.createObject(root, { interval: ms })
+        t.then = f
+        t.start()
+    }
+
+    Component {
+        id: oneShot
+        Timer {
+            property var then: null
+            onTriggered: { var f = then; then = null; destroy(); if (f) f() }
+        }
     }
 
     /// Where Names Wallet stands: installed and open, on our network, and which accounts it gave.
