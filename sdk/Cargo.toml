@@ -16,6 +16,9 @@ lez = [
 
 # LNS names for account arguments (`vesting_sdk::names`): the CLI and the Basecamp module resolve
 # names through the LNS registry with it. No chain or proving dependencies.
+# A local relay in front of a public RPC: pacing, retries on HTTP 429, plain-word errors
+# (`vesting_sdk::rpc_guard`); the Basecamp module and the CLI route every request through it.
+guard = ["dep:ureq", "dep:serde_json"]
 names = ["dep:logos-lns", "dep:logos-rpc", "dep:logos-accounts", "dep:aes-gcm", "dep:bs58", "dep:serde", "dep:serde_json"]
 
 [dependencies]
@@ -25,6 +28,7 @@ logos-rpc = { path = "../vendor/logos-sdk/rpc", optional = true }
 logos-accounts = { path = "../vendor/logos-sdk/accounts", optional = true }
 aes-gcm = { version = "0.10", optional = true }
 bs58 = { version = "0.5", optional = true }
+ureq = { version = "2", optional = true }
 vesting-program = { path = "../program", optional = true }
 token_core = { git = "https://github.com/logos-blockchain/lez-programs.git", rev = "cad71fc67d75ec9f6a07fc908f687678de7f7ed6", optional = true }
 clap = { version = "4", optional = true }

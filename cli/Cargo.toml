@@ -13,7 +13,7 @@ lez = ["vesting-sdk/lez"]
 
 [dependencies]
 vesting-core = { path = "../core" }
-vesting-sdk = { path = "../sdk", features = ["names"] }
+vesting-sdk = { path = "../sdk", features = ["names", "guard"] }
 borsh = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

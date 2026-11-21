@@ -80,6 +80,13 @@ pub struct Module {
     book: NameBook,
     /// LNS lookups; tests put a mock here.
     lns_client: Option<RpcClient>,
+    /// The local relay in front of a public RPC: pacing, retries, plain errors.
+    guard: Option<vesting_sdk::rpc_guard::RpcGuard>,
+    /// The wallet's accounts as last read, kept a few seconds so one refresh reads them once.
+    accounts_cache: Option<(std::time::Instant, Vec<WalletAccount>)>,
+    /// Tests: put the relay in front of a local RPC too, with this policy.
+    guard_local: Option<vesting_sdk::rpc_guard::Policy>,
+    caching: bool,
 }
 
 fn ok(mut value: Value) -> String {
@@ -87,12 +94,22 @@ fn ok(mut value: Value) -> String {
     value.to_string()
 }
 
+/// A failure answer in plain words: the RPC relay's words when a network problem is behind it
+/// (busy, unreachable), never a response body; the raw detail (status and at most 200
+/// characters, tags removed) goes in `detail`, for Technical details.
 fn fail(message: impl Into<String>) -> String {
-    json!({ "ok": false, "error": message.into() }).to_string()
+    let (words, detail) = vesting_sdk::rpc_guard::plain_error(&message.into());
+    let mut answer = json!({ "ok": false, "error": words });
+    if let Some(detail) = detail {
+        answer["detail"] = json!(detail);
+    }
+    answer.to_string()
 }
 
 fn sdk_fail(error: SdkError) -> String {
-    json!({ "ok": false, "error": error.message(), "code": error.code() }).to_string()
+    let mut answer: Value = serde_json::from_str(&fail(error.message())).unwrap_or_default();
+    answer["code"] = json!(error.code());
+    answer.to_string()
 }
 
 fn b58(account: &AccountId) -> String {
@@ -135,7 +152,33 @@ impl Module {
             status: "not opened yet".into(),
             book,
             lns_client: None,
+            guard: None,
+            accounts_cache: None,
+            guard_local: None,
+            caching: true,
         }
+    }
+
+    /// Measurements: turn the module's and the backend's read caches off (`false`) or on.
+    #[doc(hidden)]
+    pub fn set_caching(&mut self, on: bool) {
+        self.caching = on;
+        self.accounts_cache = None;
+        #[cfg(feature = "lez")]
+        if let Some(client) = self.client.as_mut() {
+            client.backend_mut().set_caching(on);
+        }
+    }
+
+    /// Measurements: what the relay sent, per method, and how many were refused.
+    #[doc(hidden)]
+    pub fn network_requests(&self) -> Option<(std::collections::BTreeMap<String, u64>, u64)> {
+        self.guard.as_ref().map(|g| g.stats())
+    }
+
+    /// Tests: route even a local RPC through the relay, with `policy`.
+    pub fn guard_local_rpc(&mut self, policy: vesting_sdk::rpc_guard::Policy) {
+        self.guard_local = Some(policy);
     }
 
     /// Tests: answer LNS lookups from this client instead of the network's RPC.
@@ -180,6 +223,32 @@ impl Module {
         Ok(net)
     }
 
+    /// Where requests for `rpc` go: through the relay for a public RPC (started once per RPC),
+    /// straight to a local one.
+    fn rpc_url(&mut self, rpc: &str) -> Result<String, String> {
+        if network::is_loopback(rpc) && self.guard_local.is_none() {
+            return Ok(rpc.to_string());
+        }
+        if let Some(guard) = &self.guard {
+            if guard.upstream() == rpc {
+                return Ok(guard.url().to_string());
+            }
+        }
+        #[cfg(feature = "lez")]
+        let hook = Some(vesting_sdk::lez::tx_hash_hook());
+        #[cfg(not(feature = "lez"))]
+        let hook = None;
+        let guard = vesting_sdk::rpc_guard::RpcGuard::start(
+            rpc,
+            self.guard_local.unwrap_or_default(),
+            hook,
+        )
+        .map_err(|e| format!("could not start the network relay: {e}"))?;
+        let url = guard.url().to_string();
+        self.guard = Some(guard);
+        Ok(url)
+    }
+
     /// Open the backend from the settings (the chain check first).
     fn open(&mut self) -> Result<(), String> {
         let net = self.effective_network()?;
@@ -200,7 +269,8 @@ impl Module {
                     ));
                 }
             } else {
-                let served = network::channel_id(&names::http_client(&net.rpc))?;
+                let via = self.rpc_url(&net.rpc)?;
+                let served = network::channel_id(&names::http_client(&via))?;
                 if served != net.chain_id {
                     return Err(format!(
                         "{} serves chain {served}, not {}: check the RPC and the network",
@@ -218,8 +288,9 @@ impl Module {
             let clock_elf = Some(self.settings.clock_elf.trim())
                 .filter(|p| !p.is_empty())
                 .map(PathBuf::from);
+            let via = self.rpc_url(&net.rpc)?;
             let mut backend = vesting_sdk::LezBackend::open_with_password(
-                &net.rpc,
+                &via,
                 Path::new(wallet_dir),
                 program,
                 clock_elf,
@@ -289,11 +360,16 @@ impl Module {
             Some(net) => net.clone(),
             None => self.effective_network()?,
         };
+        let via = if self.lns_client.is_none() {
+            self.rpc_url(&net.rpc)?
+        } else {
+            String::new()
+        };
         let built;
         let client: &RpcClient = match &self.lns_client {
             Some(client) => client,
             None => {
-                built = names::http_client(&net.rpc);
+                built = names::http_client(&via);
                 &built
             }
         };
@@ -342,8 +418,21 @@ impl Module {
     }
 
     fn wallet_accounts(&mut self) -> Result<Vec<WalletAccount>, String> {
-        let client = self.client()?;
-        client.backend().accounts()
+        if let Some((at, accounts)) = &self.accounts_cache {
+            if at.elapsed() < std::time::Duration::from_secs(10) {
+                return Ok(accounts.clone());
+            }
+        }
+        let accounts = self.client()?.backend().accounts()?;
+        if self.caching {
+            self.accounts_cache = Some((std::time::Instant::now(), accounts.clone()));
+        }
+        Ok(accounts)
+    }
+
+    /// After a write: balances and roles may have changed.
+    fn forget_reads(&mut self) {
+        self.accounts_cache = None;
     }
 
     fn tx(&self) -> Value {
@@ -384,6 +473,10 @@ impl Module {
             "has_password": self.password.is_some(),
             "chain": cfg!(feature = "lez"),
             "data_dir": self.dir.display().to_string(),
+            "network_requests": self.guard.as_ref().map(|g| {
+                let (sent, refused) = g.stats();
+                json!({ "by_method": sent, "total": sent.values().sum::<u64>(), "refused": refused })
+            }),
         }))
     }
 
@@ -555,6 +648,7 @@ impl Module {
     /// `Client::create`. Input: one schedule (`creator`, `beneficiary`, `token` ("LEZ" or a
     /// token definition), `total`, `kind`, flags, authorities); accounts may be names.
     pub fn create(&mut self, input: &str) -> String {
+        self.forget_reads();
         answer(|| {
             let mut row: Value =
                 serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -577,6 +671,7 @@ impl Module {
 
     /// `Client::create_batch`: a JSON array of schedules (one creator), one transaction.
     pub fn create_batch(&mut self, input: &str) -> String {
+        self.forget_reads();
         answer(|| {
             let value: Value =
                 serde_json::from_str(input).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -617,6 +712,7 @@ impl Module {
 
     /// `Client::claim_public`, by the schedule's beneficiary.
     pub fn claim_public(&mut self, id: u64) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             match self.client()?.claim_public(id, caller) {
@@ -630,6 +726,7 @@ impl Module {
     /// comes from the wallet (a private account it holds), never from the view, and the claim's
     /// fee is simulated first: a claim whose private destination couldn't pay is not sent.
     pub fn claim_private(&mut self, id: u64, target: &str) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             let (target, _) = self.resolve(target.trim())?;
@@ -666,6 +763,7 @@ impl Module {
 
     /// `Client::cancel`, by the schedule's cancel authority.
     pub fn cancel(&mut self, id: u64) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.cancel_authority;
             match self.client()?.cancel(id, caller) {
@@ -680,6 +778,7 @@ impl Module {
 
     /// `Client::make_irrevocable`, by the schedule's cancel authority.
     pub fn make_irrevocable(&mut self, id: u64) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.cancel_authority;
             match self.client()?.make_irrevocable(id, caller) {
@@ -691,6 +790,7 @@ impl Module {
 
     /// `Client::signal_milestone`, by the schedule's milestone authority.
     pub fn signal_milestone(&mut self, id: u64, index: u64) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.milestone_authority;
             match self.client()?.signal_milestone(id, caller, index as usize) {
@@ -705,6 +805,7 @@ impl Module {
 
     /// `Client::transfer_beneficiary`, by the schedule's beneficiary.
     pub fn transfer_beneficiary(&mut self, id: u64, new_beneficiary: &str) -> String {
+        self.forget_reads();
         answer(|| {
             let caller = self.schedule(id)?.beneficiary;
             let (to, name) = self.resolve(new_beneficiary.trim())?;
@@ -719,6 +820,7 @@ impl Module {
 
     /// Give an on-chain schedule account (made elsewhere) a local id, so its beneficiary sees it.
     pub fn import_schedule(&mut self, account: &str) -> String {
+        self.forget_reads();
         answer(|| {
             let (account, _) = self.resolve(account.trim())?;
             let id = self.client()?.backend_mut().import_account(account)?;

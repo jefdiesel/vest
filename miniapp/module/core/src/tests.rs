@@ -314,3 +314,85 @@ fn ids_arrive_as_text() {
     let answer = parse(bad_input("id must be a whole number, got 'x'"));
     assert_eq!(answer["ok"], false);
 }
+
+/// A fake public RPC that always answers like the edge's rate limit: HTTP 429 and an HTML page.
+fn rate_limited_rpc() -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut out = stream;
+            loop {
+                let mut length = 0usize;
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let page = "<!DOCTYPE html><html><body><h1>Error 1015</h1><p>You are being rate limited</p></body></html>";
+                let head = format!("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: {}\r\n\r\n", page.len());
+                if out
+                    .write_all(head.as_bytes())
+                    .and_then(|_| out.write_all(page.as_bytes()))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    });
+    url
+}
+
+#[test]
+fn a_rate_limited_network_is_plain_words_never_html() {
+    let _serial = lock();
+    let mut module = fresh(500, 9);
+    module.guard_local_rpc(vesting_sdk::rpc_guard::Policy {
+        per_second: 50,
+        tries: 3,
+        first_wait: std::time::Duration::from_millis(10),
+        max_wait: std::time::Duration::from_millis(20),
+    });
+    let rpc = rate_limited_rpc();
+    parse(
+        module.configure(
+            &json!({ "rpc": rpc, "chain_id": "", "lns_registry": hex_id(7) }).to_string(),
+        ),
+    );
+    let answer = parse(module.resolve_name("alice"));
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"], vesting_sdk::rpc_guard::STILL_BUSY);
+    let text = answer.to_string();
+    assert!(!text.contains("<html") && !text.contains("<h1>"), "{text}");
+    assert!(
+        answer["detail"].as_str().unwrap_or("").contains("HTTP 429"),
+        "{text}"
+    );
+    // The relay counted every try, and the settings say so.
+    let settings = parse(module.settings());
+    assert_eq!(settings["network_requests"]["refused"], 3);
+}
+
+#[test]
+fn an_error_with_html_in_it_never_reaches_the_app() {
+    let answer = parse(fail(
+        "RPC failed: <!DOCTYPE html><html><body>blocked</body></html>",
+    ));
+    assert_eq!(answer["ok"], false);
+    assert!(!answer.to_string().contains("<html"));
+    assert!(answer["error"].as_str().unwrap().contains("can't read"));
+}

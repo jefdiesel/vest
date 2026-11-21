@@ -15,6 +15,54 @@ pub use backend_impl::{wallet_cli, LastTx, LezBackend};
 #[cfg(feature = "lez")]
 pub use vesting_program as program;
 
+/// The public accounts a transaction touched, read by its hash (`getTransaction`) through
+/// `rpc` (tools and measurements: finding the schedule account a Create made).
+#[cfg(all(feature = "lez", feature = "guard"))]
+#[doc(hidden)]
+pub fn transaction_accounts(rpc: &str, hash: &str) -> Result<Vec<[u8; 32]>, String> {
+    let request = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "getTransaction", "params": [hash] });
+    let text = ureq::post(rpc)
+        .set("Content-Type", "application/json")
+        .send_string(&request.to_string())
+        .map_err(|e| e.to_string())?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    let answer: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let found = answer
+        .get("result")
+        .cloned()
+        .ok_or_else(|| format!("no result: {text:.200}"))?;
+    let (tx, _block): (common::transaction::LeeTransaction, u64) =
+        serde_json::from_value(found).map_err(|e| e.to_string())?;
+    match tx {
+        common::transaction::LeeTransaction::Public(tx) => Ok(tx
+            .affected_public_account_ids()
+            .into_iter()
+            .map(|id| id.into_value())
+            .collect()),
+        common::transaction::LeeTransaction::PrivacyPreserving(tx) => Ok(tx
+            .affected_public_account_ids()
+            .into_iter()
+            .map(|id| id.into_value())
+            .collect()),
+    }
+}
+
+/// For the RPC relay (`rpc_guard`): the hash of a `sendTransaction`'s transaction, as
+/// `getTransaction` takes it, so a refused write is looked up before it is ever resent.
+#[cfg(all(feature = "lez", feature = "guard"))]
+pub fn tx_hash_hook() -> Box<crate::rpc_guard::TxHash> {
+    Box::new(|params: &serde_json::Value| {
+        let tx = match params {
+            serde_json::Value::Array(items) => items.first()?,
+            serde_json::Value::Object(map) => map.get("tx")?,
+            _ => return None,
+        };
+        let tx: common::transaction::LeeTransaction = serde_json::from_value(tx.clone()).ok()?;
+        Some(serde_json::Value::String(tx.hash().to_string()))
+    })
+}
+
 #[cfg(feature = "lez")]
 mod backend_impl {
     use crate::{Backend, BackendError, FeeEstimate, FeePayer, ScheduleId};
@@ -80,6 +128,13 @@ mod backend_impl {
         dry_run: bool,
         /// The report of the last dry-run send.
         dry_report: Option<Box<DryRunReport>>,
+        /// Deployed programs read for a transaction's catalog, kept 10 minutes: a claim summary
+        /// and the claim after it would otherwise read every ELF segment twice.
+        programs: std::sync::Mutex<BTreeMap<AccountId, (std::time::Instant, Program)>>,
+        /// Schedule states read in the last 3 seconds (one refresh reads each once); forgotten
+        /// after every transaction.
+        reads: std::sync::Mutex<BTreeMap<AccountId, (std::time::Instant, Vec<u8>)>>,
+        caching: bool,
         gas_limit: Option<u64>,
         last: Option<LastTx>,
     }
@@ -169,9 +224,20 @@ mod backend_impl {
                 caller: None,
                 dry_run: false,
                 dry_report: None,
+                programs: Default::default(),
+                reads: Default::default(),
+                caching: true,
                 gas_limit: None,
                 last: None,
             })
+        }
+
+        /// Measurements: turn the read caches (program catalog, schedule states) off.
+        #[doc(hidden)]
+        pub fn set_caching(&mut self, on: bool) {
+            self.caching = on;
+            self.programs.lock().map(|mut p| p.clear()).ok();
+            self.reads.lock().map(|mut r| r.clear()).ok();
         }
 
         /// The 0.4 token program for token schedules (`--token` other than zero).
@@ -309,9 +375,24 @@ mod backend_impl {
             wallet: &WalletCore<SequencerClient>,
             address: AccountId,
         ) -> Result<Option<ScheduleState>, BackendError> {
-            let bytes = self
-                .runtime
-                .block_on(Self::public_state(wallet, address, self.program))?;
+            let fresh = self.reads.lock().ok().and_then(|reads| {
+                reads
+                    .get(&address)
+                    .filter(|(at, _)| at.elapsed() < std::time::Duration::from_secs(3))
+                    .map(|(_, bytes)| bytes.clone())
+            });
+            let bytes = match fresh {
+                Some(bytes) => bytes,
+                None => {
+                    let bytes =
+                        self.runtime
+                            .block_on(Self::public_state(wallet, address, self.program))?;
+                    if let (true, Ok(mut reads)) = (self.caching, self.reads.lock()) {
+                        reads.insert(address, (std::time::Instant::now(), bytes.clone()));
+                    }
+                    bytes
+                }
+            };
             if bytes.is_empty() {
                 return Ok(None);
             }
@@ -325,20 +406,49 @@ mod backend_impl {
             wallet: &WalletCore<SequencerClient>,
             programs: &[AccountId],
         ) -> Result<ProgramCatalog, BackendError> {
+            let cached = |id: &AccountId| {
+                self.programs.lock().ok().and_then(|programs| {
+                    programs
+                        .get(id)
+                        .filter(|(at, _)| at.elapsed() < std::time::Duration::from_secs(600))
+                        .map(|(_, program)| program.clone())
+                })
+            };
+            let keep = |id: AccountId, program: &Program| {
+                if let (true, Ok(mut programs)) = (self.caching, self.programs.lock()) {
+                    programs.insert(id, (std::time::Instant::now(), program.clone()));
+                }
+            };
             let mut entries = Vec::new();
             for program in programs {
-                let deployed = ProgramLoader(wallet)
-                    .program(*program)
-                    .await
-                    .map_err(|e| BackendError::Io(e.to_string()))?
-                    .ok_or_else(|| {
-                        BackendError::Io(format!("program {program} is not deployed"))
-                    })?;
+                let deployed = match cached(program) {
+                    Some(deployed) => deployed,
+                    None => {
+                        let deployed = ProgramLoader(wallet)
+                            .program(*program)
+                            .await
+                            .map_err(|e| BackendError::Io(e.to_string()))?
+                            .ok_or_else(|| {
+                                BackendError::Io(format!("program {program} is not deployed"))
+                            })?;
+                        keep(*program, &deployed);
+                        deployed
+                    }
+                };
                 entries.push((*program, deployed));
             }
             // The clock is a builtin: a proven transaction that reaches it needs its ELF too.
             let clock_id = clock::clock_account_id();
-            let clock_program = match ProgramLoader(wallet).program(clock_id).await.ok().flatten() {
+            let clock_program = match cached(&clock_id) {
+                Some(program) => Some(program),
+                None => ProgramLoader(wallet)
+                    .program(clock_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .inspect(|p| keep(clock_id, p)),
+            };
+            let clock_program = match clock_program {
                 Some(program) => Some(program),
                 None => match &self.clock_elf {
                     Some(path) => {
@@ -547,6 +657,9 @@ mod backend_impl {
             {
                 Sent::Applied(last) => {
                     self.last = Some(last);
+                    if let Ok(mut reads) = self.reads.lock() {
+                        reads.clear();
+                    }
                     Ok(())
                 }
                 // A dry run is not a write: the caller (the CLI's --dry-run) shows the report.

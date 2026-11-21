@@ -118,6 +118,8 @@ const refused = L.reply(JSON.stringify({ error: "Call refused", message: "expect
 check("reply: the host's refusal is shown, not 'no answer'", [refused.ok, refused.error], [false, "Basecamp refused the call (pre_claim_summary): expected integer at arg0, got number"]);
 check("reply: an error object without ok or message", [L.reply({ error: "boom" }).ok, /boom/.test(L.reply({ error: "boom" }).error), /No answer/.test(L.reply({ error: "boom" }).error)], [false, true, false]);
 check("reply: a missing module as an error object", L.reply({ error: "Module not connected", module: "vesting" }).missing, true);
+check("reply: the module's detail stays with the answer (shown only under Technical details)", L.reply(JSON.stringify({ ok: false, error: "Still busy. Try again in a minute.", detail: "HTTP 429: Rate limited" })).detail, "HTTP 429: Rate limited");
+check("reply: an HTML body from the edge is never the message", (() => { const r = L.reply("<!DOCTYPE html><html><body>Error 1015 rate limited</body></html>"); return [r.ok, /<|html/i.test(r.error)]; })(), [false, false]);
 check("reply: no answer", [L.reply("").ok, /No answer/.test(L.reply(undefined).error)], [false, true]);
 
 // ── The module's data ─────────────────────────────────────────────────────────────

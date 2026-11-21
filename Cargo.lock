@@ -10321,6 +10321,7 @@ dependencies = [
  "serde_json",
  "token_core",
  "tokio",
+ "ureq 2.12.1",
  "url",
  "vesting-core",
  "vesting-program",

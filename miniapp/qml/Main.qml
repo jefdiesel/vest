@@ -39,9 +39,11 @@ Item {
     property var sheet: null                   // a step that can't be undone: {kind, schedule}
     property string resultLine: ""
     property bool resultBad: false
+    property string resultDetail: ""           // a failure's raw detail, for Technical details
     property bool loading: false
     property bool busy: false                  // a write is running: others rest
     property string workingOn: ""              // which one
+    property string lastDetail: ""             // the detail of the last failed call
 
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
@@ -79,7 +81,11 @@ Item {
             done({ ok: false, error: "This app runs inside Basecamp, with the Vesting module installed." })
             return
         }
-        var settle = function(raw) { done(Logic.reply(raw)) }
+        var settle = function(raw) {
+            var r = Logic.reply(raw)
+            if (!r.ok && r.detail) root.lastDetail = String(r.detail)
+            done(r)
+        }
         if (logos.callModuleAsync)
             logos.callModuleAsync("vesting", method, args, settle, patience || 60000)
         else
@@ -147,6 +153,8 @@ Item {
         var t = String(message || "").trim()
         resultLine = t === "" ? "" : t.charAt(0).toUpperCase() + t.substr(1) + (/[.?!]$/.test(t) ? "" : ".")
         resultBad = !!bad
+        resultDetail = bad ? lastDetail : ""
+        lastDetail = ""
     }
 
     /// A write: one at a time, the button shows its busy label, then the list is read again so
@@ -780,6 +788,14 @@ Item {
                 Field { id: lnsField; look: root.look; Layout.fillWidth: true; code: true }
                 Label { text: "Clock program file (only if the network doesn't serve it)" }
                 Field { id: clockField; look: root.look; Layout.fillWidth: true; code: true }
+            }
+
+            // A failure's raw detail (status, a cleaned excerpt), folded under the result line.
+            TechDetails {
+                visible: root.resultBad && root.resultDetail !== ""
+                look: root.look
+                summary: ""
+                FactRow { look: root.look; key: "Detail"; value: root.resultDetail; monospace: true }
             }
 
             // The result of the last step, on the same left edge.

@@ -13,6 +13,9 @@ pub mod lez;
 /// LNS names for account arguments (feature `names`).
 #[cfg(feature = "names")]
 pub mod names;
+/// A paced, retrying relay in front of a public RPC (feature `guard`).
+#[cfg(feature = "guard")]
+pub mod rpc_guard;
 
 pub use backend::{Backend, BackendError, FeeEstimate, FeePayer, ScheduleId};
 pub use client::{pre_claim_summary, AccountKind, AccountRef, Client, PreClaimSummary};
