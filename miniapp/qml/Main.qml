@@ -64,6 +64,7 @@ Item {
     property bool busy: false
     property string workingOn: ""
     property bool justCreated: false
+    property bool fromFull: false             // the From row shows the whole address
     property var receipt: null                 // the last create's receipt (Logic.receiptOf input)
     property var shownAddr: ({})               // which receipt rows show their full address
 
@@ -279,13 +280,13 @@ Item {
 
     function doImport() {
         var a = Logic.accountInput(importField.text)
-        if (!a.ok) { say("Paste the schedule code, or the LNS name of the person paying you.", true); return }
+        if (!a.ok) { say("Paste the schedule code the person paying you sent.", true); return }
         busy = true
         workingOn = "import"
         call("import_schedule", [a.account], function(r) {
             busy = false
             workingOn = ""
-            if (!r.ok) { say(r.error, true); return }
+            if (!r.ok) { say(Logic.importProblem(importField.text, r.error), true); return }
             importField.text = ""
             recipientId = r.id
             say("Added schedule " + r.id + ".", false, Logic.nextLine("import"))
@@ -673,7 +674,13 @@ Item {
                 FactRow { look: root.look; key: "Claimed"; value: root.selected ? root.selected.claimed_display + (root.selected.cancelled ? "" : " of " + root.selected.total_display) : "" }
                 FactRow { look: root.look; key: "Still locked"; visible: !!root.selected && !Logic.isClosed(root.selected); value: root.selected ? root.selected.locked_display : "" }
                 FactRow { look: root.look; key: "Next"; visible: !!root.selected && !Logic.isClosed(root.selected); value: root.selected ? Logic.nextUnlock(root.selected, root.viewTime()).text : "" }
-                FactRow { look: root.look; key: "From"; value: root.selected ? Logic.labelled(root.selected.creator, root.names) : "" }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    FactRow { look: root.look; Layout.fillWidth: true; key: "From"; value: root.selected ? (root.fromFull ? Logic.base58Of(root.selected.creator) : (Logic.nameOf(root.selected.creator, root.names) || Logic.short(Logic.base58Of(root.selected.creator)))) : ""; monospace: root.fromFull }
+                    Link { look: root.look; visible: !!root.selected; text: root.fromFull ? "Hide" : "Show"; onPressed: root.fromFull = !root.fromFull }
+                    Link { look: root.look; visible: !!root.selected; text: "Copy"; onPressed: root.copy(Logic.base58Of(root.selected.creator), "Address") }
+                }
                 RowLayout {
                     visible: !!(root.selected && root.selected.address)
                     spacing: 16
@@ -1137,7 +1144,7 @@ Item {
     component ImportRow: RowLayout {
         Layout.fillWidth: true
         spacing: 8
-        Field { id: importInput; look: root.look; Layout.fillWidth: true; hint: "Schedule code, or the payer's LNS name"; onTextChanged: importField.text = text }
+        Field { id: importInput; look: root.look; Layout.fillWidth: true; hint: "Schedule code (the person paying you has it)"; onTextChanged: importField.text = text }
         Action {
             look: root.look; changes: true; busy: root.busy
             label: "Add schedule"; busyLabel: "Adding…"; working: root.workingOn === "import"

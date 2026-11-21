@@ -663,7 +663,7 @@ export function guideSteps(role, at) {
         ? ["Connect Names Wallet",
            "Choose who, how much and the schedule",
            "Approve it in Names Wallet",
-           "Tell them your LNS name, so their Vest can find it",
+           "Send them the schedule code",
            "Cancel it, or make it permanent, later if you need to"]
         : ["Connect Names Wallet",
            "Your schedules appear here (or paste the address someone sent you)",
@@ -674,7 +674,7 @@ export function guideSteps(role, at) {
         ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Below: the account that pays, the person (address or LNS name), the amount, and when it unlocks.",
            "Names Wallet shows the payment and its fee. Nothing leaves your account until you approve.",
-           "In their Vest they open Receive, type your LNS name and press Add schedule: Vest finds what you made for them. No LNS name? Send the schedule code instead (Copy schedule code).",
+           "Press Copy schedule code and send it to them. In their Vest they open Receive, paste it and press Add schedule.",
            "Cancel stops what hasn't unlocked and returns it to you. Permanent means nobody can cancel."]
         : ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Schedules paid to your accounts show up by themselves. If not, paste the address or LNS name the sender gave you.",
@@ -724,9 +724,7 @@ export function timeline(kind) {
 /// What happens next, after each action: one line for the Result line.
 export function nextLine(action, info) {
     info = info || {}
-    if (action === "create") return info.name
-        ? "Schedule " + info.id + " is live. Tell them your LNS name, " + clean(info.name) + ": in their Vest they open Receive, type " + clean(info.name) + " and press Add schedule."
-        : "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
+    if (action === "create") return "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
     if (action === "batch") return "The schedules are live. Send each person their schedule code, or your LNS name."
     if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
     if (action === "cancel") return "Nothing more unlocks. What had already unlocked stays theirs to claim."
@@ -763,6 +761,17 @@ export function createSummary(built, typed) {
     return "Create a Vest schedule: " + ((built && built.amount_display) || "") + " from this account, to " + clean(name) + (built && built.beneficiary_base58 ? " (" + short(built.beneficiary_base58) + ")" : "")
 }
 
+/// What to say when Add schedule was given something that isn't a schedule.
+export function importProblem(typed, error) {
+    var t = String(typed == null ? "" : typed).trim()
+    var e = String(error || "")
+    if (/is not a schedule of this Vest program/.test(e))
+        return accountKind(t) === "name"
+            ? clean(t) + " is a person's LNS name, not a schedule. Ask them for the schedule code (Vest shows it after they create it) and paste that here."
+            : "That address isn't a Vest schedule. Ask the person paying you for the schedule code (Vest shows it after they create it) and paste that here."
+    return e
+}
+
 /// The receipt shown after a create: what was made, between whom, on what plan, and the proof.
 /// `r`: {id, amountDisplay, kind, start, cliff, end, cancelable, transferable, fromAddr, fromName,
 /// toAddr, toName, tx, code}. Returns {title, rows: [{key, value, addr?}], share}.
@@ -780,9 +789,7 @@ export function receiptOf(r) {
         { key: "Transaction", value: r.tx ? short(r.tx) : "sent", addr: r.tx || "" },
         { key: "Schedule code", value: r.code ? short(r.code) : "", addr: r.code || "" }
     ]
-    var share = r.fromName
-        ? "Tell them your LNS name, " + clean(r.fromName) + ": in their Vest they open Receive, type it and press Add schedule."
-        : "Send them the schedule code: in their Vest they open Receive, paste it and press Add schedule."
+    var share = "Send them the schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
     return { title: "Schedule " + (r.id !== undefined && r.id !== "" ? r.id + " " : "") + "created", rows: rows, share: share }
 }
 
