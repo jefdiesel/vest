@@ -688,8 +688,19 @@ export function guideSteps(role, at) {
            "See what you can claim now and when the rest unlocks",
            "Claim to your public account, or privately",
            "Approve it in Names Wallet"]
+    var details = role === "pay"
+        ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in the Names app; Vest never sees a key.",
+           "Below: the account that pays, the person (address or LNS name), the amount, and when it unlocks.",
+           "Names Wallet shows the payment and its fee. Nothing leaves your account until you approve.",
+           "They add the schedule in their own Vest with that address or name, then claim as it unlocks.",
+           "Cancel stops what hasn't unlocked and returns it to you. Permanent means nobody can cancel."]
+        : ["Names Wallet asks you which of your accounts Vest may see. You approve it in the Names app; Vest never sees a key.",
+           "Schedules paid to your accounts show up by themselves. If not, paste the address or LNS name the sender gave you.",
+           "Choose a schedule below: it shows what is claimable now, what is still locked, and the next unlock.",
+           "Press Check claim. Vest shows the amount and where it goes before anything is sent.",
+           "Names Wallet shows the claim and its fee. Approve it there; the tokens arrive in a few seconds."]
     return steps.map(function(text, i) {
-        return { n: i + 1, text: text, state: i < at ? "done" : i === at ? "now" : "later" }
+        return { n: i + 1, text: text, detail: details[i], state: i < at ? "done" : i === at ? "now" : "later" }
     })
 }
 

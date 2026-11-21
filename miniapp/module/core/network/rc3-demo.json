@@ -2,7 +2,7 @@
   "format": "names-network/1",
   "version": 2,
   "revision": 1,
-  "name": "Bridge test network (LEZ rc3 demo chain)",
+  "name": "Bridge test network",
   "kind": "our-test",
   "lez": "0.4",
   "lez_release": { "tag": "v0.4.0-rc3", "commit": "bafd07be", "risc0": "3.0.5", "wire": "rc3" },

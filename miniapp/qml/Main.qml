@@ -322,6 +322,13 @@ Item {
 
     // ── Claiming ────────────────────────────────────────────────────────────────────
 
+    /// The choice on the first screen: what the person came to do. Once connected it also opens that tab.
+    function pickRole(role) {
+        guideRole = role
+        if (connected) tab = role === "pay" ? "pay" : "receive"
+    }
+    onTabChanged: if (tab !== "settings") guideRole = tab === "pay" ? "pay" : "receive"
+
     function chooseKind(kind) {
         destKind = kind
         destAccount = kind === "private" && privateAccounts.length ? privateAccounts[0].id : ""
@@ -523,7 +530,7 @@ Item {
                     network: root.networkName !== "" ? Logic.clean(root.networkName) : ""
                     networkDetail: root.info && root.info.network && root.info.network.rpc ? Logic.hostOf(root.info.network.rpc) : ""
                 }
-                Link { look: root.look; Layout.alignment: Qt.AlignTop; text: root.showGuide ? "Hide guide" : "Guide"; onPressed: root.showGuide ? root.finishGuide() : root.guideOpen = true }
+                Link { look: root.look; Layout.alignment: Qt.AlignTop; visible: root.connected; text: root.showGuide ? "Hide steps" : "Steps"; onPressed: root.showGuide ? root.finishGuide() : root.guideOpen = true }
             }
 
             // ── Names Wallet: missing, another network, not connected yet, asking ─────
@@ -541,65 +548,78 @@ Item {
                 Action { look: root.look; label: "Check again"; onPressed: root.refresh() }
             }
             Card {
-                visible: !root.walletMode && (root.namesState === "disconnected" || root.namesState === "asking") && root.tab !== "settings"
-                Heading { text: root.namesState === "asking" ? "Approve Vest in Names Wallet" : "Connect Names Wallet" }
-                Body {
-                    text: root.namesState === "asking"
-                        ? "Names Wallet is asking which accounts Vest may see. Open the Names app, tick the accounts you use for vesting, and approve. Vest never sees a key."
-                        : "Vest uses your Names Wallet to see your accounts and to sign. You choose which accounts Vest may see, and you approve every payment and claim in Names."
-                }
-                RowLayout {
-                    spacing: 8
-                    Action {
-                        look: root.look; strong: true
-                        label: "Connect Names Wallet"; busyLabel: "Waiting for Names…"; working: root.namesState === "asking"
-                        onPressed: root.connectNames()
-                    }
-                    Link { look: root.look; visible: root.namesState === "asking"; text: "Check again"; onPressed: root.readNames() }
-                }
-            }
-            Card {
                 visible: root.walletMode && !root.chainOpen && root.tab !== "settings" && Logic.connectProblem(root.info) !== ""
                 Heading { text: "Not connected" }
                 Body { text: Logic.connectProblem(root.info); color: look.alarm }
                 Action { look: root.look; label: "Open settings"; onPressed: root.tab = "settings" }
             }
 
-            // ── How it works ───────────────────────────────────────────────────────
+            // ── Steps: what to do, one at a time ─────────────────────────────────────
+            // The first screen: pick what you came to do, then numbered steps. The step you are
+            // on says what to do and holds its button (step 1: connect Names Wallet).
             Card {
                 visible: root.showGuide && root.namesState !== "missing" && root.namesState !== "otherZone"
-                Heading { text: "How it works" }
+                Heading { text: "What do you want to do?" }
                 RowLayout {
                     spacing: 8
-                    ChoiceInline { label: "I'm receiving tokens"; chosen: root.guideRole === "receive"; onPressed: root.guideRole = "receive" }
-                    ChoiceInline { label: "I'm paying out"; chosen: root.guideRole === "pay"; onPressed: root.guideRole = "pay" }
+                    ChoiceInline { label: "Claim tokens sent to me"; chosen: root.guideRole === "receive"; onPressed: root.pickRole("receive") }
+                    ChoiceInline { label: "Pay someone over time"; chosen: root.guideRole === "pay"; onPressed: root.pickRole("pay") }
                 }
                 Repeater {
                     model: Logic.guideSteps(root.guideRole, root.guideRole === "pay" ? root.payAt : root.receiveAt)
                     delegate: RowLayout {
+                        id: step
                         required property var modelData
+                        readonly property bool now: modelData.state === "now"
                         Layout.fillWidth: true
+                        Layout.topMargin: 6
                         spacing: 12
                         Rectangle {
+                            Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: look.px(24); Layout.preferredHeight: look.px(24); radius: width / 2
-                            color: modelData.state === "now" ? look.brass : "transparent"
+                            color: step.now ? look.brass : "transparent"
                             border.width: 1
-                            border.color: modelData.state === "later" ? look.line : look.brass
-                            Text { anchors.centerIn: parent; textFormat: Text.PlainText; text: modelData.state === "done" ? "✓" : String(modelData.n); color: modelData.state === "now" ? look.slate : look.ink; font.family: look.sans; font.pixelSize: look.px(13); font.weight: Font.DemiBold }
+                            border.color: step.modelData.state === "later" ? look.line : look.brass
+                            Text { anchors.centerIn: parent; textFormat: Text.PlainText; text: step.modelData.state === "done" ? "✓" : String(step.modelData.n); color: step.now ? look.slate : look.ink; font.family: look.sans; font.pixelSize: look.px(13); font.weight: Font.DemiBold }
                         }
-                        Text {
-                            textFormat: Text.PlainText
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: modelData.text
-                            color: modelData.state === "later" ? look.dim : look.ink
-                            font.family: look.sans
-                            font.pixelSize: look.px(16)
-                            font.weight: modelData.state === "now" ? Font.DemiBold : Font.Normal
-                            wrapMode: Text.Wrap
+                            spacing: 6
+                            Text {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                text: step.modelData.text
+                                color: step.modelData.state === "later" ? look.dim : look.ink
+                                font.family: look.sans
+                                font.pixelSize: look.px(16)
+                                font.weight: step.now ? Font.DemiBold : Font.Normal
+                                wrapMode: Text.Wrap
+                            }
+                            Body {
+                                visible: step.now
+                                text: step.modelData.n === 1 && root.namesState === "asking"
+                                    ? "Names Wallet is asking you now. Open the Names app, tick the accounts you use for Vest, and approve."
+                                    : step.modelData.detail
+                            }
+                            Body {
+                                visible: step.now && step.modelData.n === 2 && root.guideRole === "pay" && !root.walletMode && root.connected
+                                text: "Not with Names Wallet yet: it can approve claims, but not a new schedule. To pay out today, use a wallet folder (Settings, Advanced)."
+                            }
+                            RowLayout {
+                                visible: step.now && step.modelData.n === 1 && !root.walletMode
+                                spacing: 16
+                                Action {
+                                    look: root.look; strong: true
+                                    label: "Connect"; busyLabel: "Waiting for you in Names…"; working: root.namesState === "asking"
+                                    onPressed: root.connectNames()
+                                }
+                                Link { look: root.look; visible: root.namesState === "asking"; text: "Check again"; onPressed: root.readNames() }
+                            }
                         }
                     }
                 }
                 RowLayout {
+                    Layout.topMargin: 4
                     spacing: 20
                     Action { look: root.look; label: "Got it"; visible: root.connected; onPressed: root.finishGuide() }
                     Link { look: root.look; text: "Read the full guide"; onPressed: Qt.openUrlExternally(Logic.GUIDE_URL) }

@@ -43,7 +43,7 @@ LIST = {"ok": True, "time": NOW, "names": {ME: "alice"}, "schedules": [
 ]}
 SETTINGS = {"ok": True, "connected": True, "status": "ready", "chain": True, "has_password": False, "data_dir": "~/Library/Application Support/Logos/vesting",
             "settings": {"wallet_dir": "~/lez-wallet", "network_file": "", "rpc": "", "chain_id": "", "program": "", "token_program": "", "lns_registry": "", "clock_elf": ""},
-            "network": {"name": "Bridge test network (LEZ rc3 demo chain)", "source": "built-in", "rpc": "https://lez.nameswallet.app/",
+            "network": {"name": "Bridge test network", "source": "built-in", "rpc": "https://lez.nameswallet.app/",
                         "chain_id": "2da7f7dfb6e51a28c942ea80391aa518253ec515e98d28cb4d83cc9e16ff5374",
                         "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHeM2", "token_program": "FCvRhHFsraY3pBKajWtvC1QCsvXw7MCeYBbNgMnjNzqz",
                         "lns_registry": "6Yxj5k8AiuBSuMAYVQFGrYKjJGUSSaWWgoB9D9XXN3gA"}}
@@ -84,7 +84,7 @@ CLAIM_CALL = {"ok": True, "program": "2kgxMAueD56gK2tArRA4ziFFw1Hz4W6njVZWGNJXHe
 SCENARIOS = {
     "first-run": ({"settings": FIRST}, {"get_config": CONFIG, "granted_accounts": NOT_GRANTED}, ""),
     "connect-pending": ({"settings": FIRST}, {"get_config": CONFIG, "granted_accounts": NOT_GRANTED,
-                        "request_access": {"request": "ab" * 16, "kind": "connect", "state": "pending"}}, "root.connectNames()"),
+                        "request_access": {"request": "ab" * 16, "kind": "connect", "state": "pending"}, "request_status": {"request": "ab" * 16, "kind": "connect", "state": "pending"}}, "root.connectNames()"),
     "names-missing": ({"settings": FIRST}, {"__missing": True}, ""),
     "other-zone": ({"settings": FIRST}, {"get_config": {"zone": {"id": "home", "channel": "01" * 32, "home": True}}}, ""),
     "guide-receive": ({"settings": NAMES_SETTINGS}, {"get_config": CONFIG, "granted_accounts": GRANTED, "account_balances": []}, ""),
