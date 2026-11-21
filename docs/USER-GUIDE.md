@@ -15,8 +15,9 @@ This guide follows the app. The same steps are on Vest's first screen, and one c
 2. Names Wallet must be on the **bridge test network** (in Names: Settings, Network). Vest says
    so plainly if it is on another one.
 3. Open **Vest**. The first screen asks **What do you want to do?**: *Claim tokens sent to me*
-   or *Pay someone over time*, then shows the five steps for that. Step 1 is **Connect**: Vest
-   opens Names with the request, you tick the accounts you use for vesting and approve, and Names
+   or *Pay someone over time*, then shows the five steps for that. Step 1 is **Connect Names
+   Wallet**: Vest opens Names with the request, you tick the accounts you use for vesting and
+   approve, and Names
    brings you back to Vest. You can take this back in Names at any time.
 
 Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates are written
@@ -26,19 +27,21 @@ Amounts are in LEZ (or, for another token, in that token's smallest unit). Dates
 
 ## Receiving tokens
 
-1. **Connect Names Wallet.**
-2. **Your schedules appear.** A schedule someone made for you shows up once you add it: ask the
-   person paying you for the schedule's address (or their LNS name) and paste it under **Add a
-   schedule**.
-3. **See what you can claim.** Choose a schedule: Vest shows what you can claim now, what you
-   have claimed, what is still locked, and when the rest unlocks. A cancelled schedule says when it
+1. **Connect Names Wallet**
+2. **Your schedules appear here (or paste the address someone sent you)**. A schedule someone made
+   for you shows up once you add it: ask the person paying you for the schedule's address (or their
+   LNS name) and paste it under **Add a schedule**.
+3. **See what you can claim now and when the rest unlocks**. Choose a schedule: Vest shows what you
+   can claim now, what you have claimed, what is still locked, and when the rest unlocks. A
+   cancelled schedule says when it
    was cancelled and what went back; what had unlocked before the cancel is still yours to claim.
-4. **Claim.** Press **Check claim**. Vest shows the amount and where it goes. A public claim pays
-   your own account, in the open: anyone can see the amount and where it went.
-5. **Approve it in Names Wallet.** Press **Claim in Names Wallet**; Vest opens Names, which shows
+4. **Claim to your public account, or privately**. Press **Check claim**. Vest shows the amount and
+   where it goes. A public claim pays your own account, in the open: anyone can see the amount and
+   where it went.
+5. **Approve it in Names Wallet**. Press **Claim in Names Wallet**; Vest opens Names, which shows
    exactly what will be signed, with the network fee. Approve it there; Names brings you back to
    Vest once the claim is sent. Vest shows "Waiting for you to
-   approve the claim in Names Wallet" until you do, then the transaction, and what happens next.
+   approve the claim in Names Wallet." until you do, then the transaction, and what happens next.
    You can withdraw the request while it waits.
 
 **Private claims.** A private claim pays a private account of yours: the amount is public, but
@@ -46,12 +49,12 @@ where the tokens go after that stays hidden. It is proven on your computer and t
 minutes. Names Wallet can't sign a private claim for Vest yet (see *What Names Wallet can't do yet*
 below); with a wallet folder (Settings, Advanced) Vest offers it.
 
-**Transferable schedules.** If the schedule was made transferable, you can hand what is still to
-unlock to another account (with a wallet folder, for now).
+**They can hand it to someone else.** If the schedule was made transferable, you can hand what is
+still to unlock to another account; Names Wallet 0.18 or later approves it for a LEZ schedule.
 
 ## Paying out
 
-1. **Connect Names Wallet.**
+1. **Connect Names Wallet**
 2. **Choose who, how much and the schedule** on **Pay out**:
    - **Evenly over time**: it unlocks a little every moment, evenly, from the start date to the
      end date.
@@ -73,9 +76,8 @@ unlock to another account (with a wallet folder, for now).
      shows who it pays (`Pays alice · 2BhK…fGrD`), or says plainly that no one holds that name.
      Create won't go ahead with a name it can't find.
    - **Several people, one transaction**: one row per person, up to 140.
-3. **Approve it in Names Wallet.**
-4. **Share the schedule's address or your LNS name** with the person receiving, so they can add
-   it in Vest.
+3. **Approve it in Names Wallet**
+4. **Share the schedule's address or your LNS name with them**, so they can add it in Vest.
 5. **Later:** on **Pay out**, under *Schedules you manage*: cancel a schedule, make it permanent,
    or unlock a milestone. Cancelling and making permanent each ask you to confirm, because neither
    can be undone.
@@ -103,11 +105,14 @@ then works from Vest, and the same steps apply without the Names approvals.
 
 Vest says what happened in one line under the page, and what to do. A few you may see:
 
-- **"Names Wallet isn't installed, or isn't open"**: install Names, open it once, then press
-  *Check again*.
-- **"Switch Names Wallet to the bridge test network"**: Names Wallet is on another network.
-- **"The network is busy" / "Still busy. Try again in a minute."**: the network's public entry
-  point limits how often one home can ask; Vest waits and retries for you. Nothing was sent twice.
+- **"Names Wallet isn't installed, or isn't open. Install Names from Basecamp's app list, open it
+  once, then come back here."**: press *Check again* once Names is open.
+- **"Names Wallet is on another network. Switch Names Wallet to the bridge test network (in Names:
+  Settings, Network), then come back."**: change the network in Names.
+- **"Names Wallet is busy."**: Vest waits and tries again a few times; nothing was sent twice.
+- **"The network is busy. Trying again in a few seconds."** / **"Still busy. Try again in a
+  minute."**: the network's public entry point limits how often one home can ask; Vest waits and
+  retries for you. Nothing was sent twice.
 - **"Nothing claimable yet"**: the line says when the next part unlocks.
 - **"You declined the claim in Names Wallet. Nothing was sent."**: the request was rejected (or
   expired after 10 minutes); press **Check claim** again when you're ready.
