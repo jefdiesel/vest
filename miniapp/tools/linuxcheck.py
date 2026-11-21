@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Does the Linux build of a Basecamp module plugin load? Usage:
-    linuxcheck.py <dev lib output> <extracted portable variant dir> [<qt lib dir> ...]
+    linuxcheck.py <dev lib output> <extracted portable variant dir> [<host lib dir> ...]
 
 The Linux counterpart of loadcheck.py, for CI. GNU ld lets a shared object keep undefined
 symbols, so a library the Rust staticlib needs but the link forgot only shows when Basecamp
@@ -10,7 +10,7 @@ dlopens the plugin. This catches it here instead:
      the first unresolved symbol or missing library.
   2. portable plugin (what the .lgx carries): no /nix/store in any RUNPATH, every NEEDED library
      is either bundled beside it or one the host provides (glibc, the C++ runtime, Qt), and the
-     plugin dlopens with RTLD_NOW against only its own folder plus the Qt libraries given.
+     plugin dlopens with RTLD_NOW against only its own folder plus the host libraries given (Qt, the C++ runtime).
 
 Run it with a python linked against the same glibc as the build (the builder's nixpkgs).
 """
@@ -79,7 +79,7 @@ def main():
             if lib not in bundled and not HOST.match(lib):
                 print(f"  NOT BUNDLED {lib} (needed by {name})")
                 failed = True
-    # Only the bundle and Qt: the store paths the dev plugin would find are out of reach.
+    # Only the bundle and the host libraries: the store paths the dev plugin would find are out of reach.
     os.environ["LD_LIBRARY_PATH"] = ":".join([folder] + qt_dirs)
     probe = subprocess.run([sys.executable, "-c",
                             "import ctypes,os,sys; ctypes.CDLL(sys.argv[1], mode=os.RTLD_NOW)", plugin],

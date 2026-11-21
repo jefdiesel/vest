@@ -88,8 +88,9 @@ jobs:
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/x" && mkdir -p "$RUNNER_TEMP/x"
           lgx extract out/vesting-*-${{ matrix.variant }}.lgx --variant ${{ matrix.variant }} --output "$RUNNER_TEMP/x"
-          # The Qt the plugin was built against, which Basecamp's host provides at run time.
-          qt=$(nix-store -qR "$(readlink -f "$RUNNER_TEMP/result-lib")" | grep -E -- '-(qtbase|qtremoteobjects|qtdeclarative)-[0-9]' | sed 's|$|/lib|')
+          # What Basecamp's host process provides at run time and the bundle leaves out: the Qt the
+          # plugin was built against and the C++ runtime (libstdc++, libgcc_s).
+          qt=$(nix-store -qR "$(readlink -f "$RUNNER_TEMP/result-lib")" | grep -E -- '-(qtbase|qtremoteobjects|qtdeclarative)-[0-9]|-gcc-[0-9.]+-lib$' | sed 's|$|/lib|')
           # A python on the build's own glibc: the builder's nixpkgs, as the flake locks it.
           py=$(nix build --impure --no-link --print-out-paths --expr \
             "(builtins.getFlake \"path:$RUNNER_TEMP/stage/module\").inputs.logos-module-builder.inputs.nixpkgs.legacyPackages.${{ matrix.system }}.python3")/bin/python3
