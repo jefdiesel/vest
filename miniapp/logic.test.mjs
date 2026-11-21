@@ -174,7 +174,7 @@ check("namesAccounts joins balances", L.namesAccounts({ accounts: [{ account: "P
 
 // ── Guides ────────────────────────────────────────────────────────────────────────
 check("guide: receiving, five one-line steps, current marked", L.guideSteps("receive", 2).map(s => s.state), ["done", "done", "now", "later", "later"]);
-check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "Share the schedule's address or your LNS name with them", "Cancel it, or make it permanent, later if you need to"]);
+check("guide: paying out, the steps", L.guideSteps("pay", 0).map(s => s.text), ["Connect Names Wallet", "Choose who, how much and the schedule", "Approve it in Names Wallet", "Send them the schedule code, or your LNS name", "Cancel it, or make it permanent, later if you need to"]);
 check("guide: every step says what to do", ["receive", "pay"].every(r => L.guideSteps(r, 0).every(x => typeof x.detail === "string" && x.detail.length > 20)), true);
 check("payee: a name shows who and the address", L.payeeLine("alice", { ok: true, name: "alice", base58: "FLBC4VrQ12UDpbG2ArnRgcwrZTz5cabKbT9oY1M7BE2Z" }).ok, true);
 check("payee: an unknown name says so", L.payeeLine("nobdy", { ok: false, error: "unknown LNS name: nobdy" }).text.startsWith("No one holds the LNS name nobdy"), true);
@@ -194,11 +194,16 @@ check("the schedule is made for the account Names found, only for what is still 
   L.payeeAccount(L.payeeFromNames("alice", FOUND), "alice"), L.payeeAccount(L.payeeFromNames("alice", FOUND), "alicia"),
   L.payeeAccount({ ok: true, base58: FOUND.account, text: "x" }, "alice"), L.payeeAccount(null, "alice")],
   ["Public/" + FOUND.account, "", "", ""]);
+check("lezText", [L.lezText("1111000000000"), L.lezText("107285968"), L.lezText("0")], ["1,111 LEZ", "0.107285968 LEZ", "0 LEZ"]);
+check("shortOfFunds: enough, too little, milestones, unknown balance", [
+  L.shortOfFunds("2000000000000", "1111000000000"), L.shortOfFunds("107285968000", "1111000000000").startsWith("This schedule needs 1,111 LEZ, and the paying account holds 107.285968 LEZ"),
+  L.shortOfFunds("1000", "0", ["600", "600"]).startsWith("This schedule needs"), L.shortOfFunds(undefined, "5")], ["", true, true, ""]);
+check("createSummary says the LNS name typed", [L.createSummary({ summary: "S", amount_display: "1 LEZ" }, "jefdiesel"), L.createSummary({ summary: "S" }, "76DoKtAcVM98avrHdPV7PiUgzCz5mAUJWJKdv5Tbj8ub")], ["Create a Vest schedule: 1 LEZ from this account, to jefdiesel", "S"]);
 check("guide: where a receiver is", [L.receiveStep({}), L.receiveStep({ connected: true }), L.receiveStep({ connected: true, schedules: true }), L.receiveStep({ connected: true, schedules: true, claimable: true }), L.receiveStep({ connected: true, schedules: true, approving: true })], [0, 1, 2, 3, 4]);
 check("guide: where a payer is", [L.payStep({}), L.payStep({ connected: true }), L.payStep({ connected: true, justCreated: true }), L.payStep({ connected: true, manages: true })], [0, 1, 3, 4]);
 check("each kind explained in one sentence", ["linear", "cliff-linear", "milestone"].map(k => L.kindExplain(k).split(". ").length <= 2 && L.kindExplain(k).length > 20), [true, true, true]);
 check("timelines", [L.timeline("linear").length, L.timeline("cliff-linear")[1].kind, L.timeline("milestone").every(s => s.kind !== "unlocking")], [1, "cliff", true]);
-check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. Send them its address or your LNS name so they can find it in Vest.", true, ""]);
+check("what happens next", [L.nextLine("create", { id: 3 }), /address/.test(L.nextLine("import")) || /list/.test(L.nextLine("import")), L.nextLine("nothing")], ["Schedule 3 is live. Send them its schedule code (Copy schedule code, below) or your LNS name, so they can add it in Vest.", true, ""]);
 {
   const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
   check("the words: LEZ is the coin, Logos the network", [/on LEZ\b/.test(qml), /a LEZ wallet/i.test(qml), /Pay tokens out over time, or claim what has unlocked for you\./.test(qml)], [false, false, true]);
@@ -330,13 +335,13 @@ check("nextLine: every remaining action", [
   L.nextLine("batch"), L.nextLine("claim", { next: "in 3 days" }), L.nextLine("cancel"),
   L.nextLine("irrevocable"), L.nextLine("signal"), L.nextLine("transfer"), L.nextLine("connect")
 ], [
-  "The schedules are live. Send each person their schedule's address or your LNS name.",
+  "The schedules are live. Send each person their schedule code, or your LNS name.",
   "The tokens are in your account. Come back when more unlocks (in 3 days).",
   "Nothing more unlocks. What had already unlocked stays theirs to claim.",
   "Nobody can cancel it any more; it runs to the end.",
   "They can claim that part now.",
-  "The person receiving claims from now on; send them the schedule's address.",
-  "Connected. Your schedules are below; if someone sent you one, paste its address."
+  "The person receiving claims from now on; send them the schedule code.",
+  "Connected. Your schedules are below; if someone sent you one, paste its schedule code."
 ]);
 check("writeWhat: the other write names", [L.writeWhat("irrevocable:3"), L.writeWhat("transfer:3")], ["making it permanent", "the transfer"]);
 check("an unknown kind reads as linear in words and on the timeline", [

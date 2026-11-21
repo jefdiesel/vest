@@ -611,7 +611,7 @@ export function guideSteps(role, at) {
         ? ["Connect Names Wallet",
            "Choose who, how much and the schedule",
            "Approve it in Names Wallet",
-           "Share the schedule's address or your LNS name with them",
+           "Send them the schedule code, or your LNS name",
            "Cancel it, or make it permanent, later if you need to"]
         : ["Connect Names Wallet",
            "Your schedules appear here (or paste the address someone sent you)",
@@ -672,16 +672,41 @@ export function timeline(kind) {
 /// What happens next, after each action: one line for the Result line.
 export function nextLine(action, info) {
     info = info || {}
-    if (action === "create") return "Schedule " + info.id + " is live. Send them its address or your LNS name so they can find it in Vest."
-    if (action === "batch") return "The schedules are live. Send each person their schedule's address or your LNS name."
+    if (action === "create") return "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below) or your LNS name, so they can add it in Vest."
+    if (action === "batch") return "The schedules are live. Send each person their schedule code, or your LNS name."
     if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
     if (action === "cancel") return "Nothing more unlocks. What had already unlocked stays theirs to claim."
     if (action === "irrevocable") return "Nobody can cancel it any more; it runs to the end."
     if (action === "signal") return "They can claim that part now."
-    if (action === "transfer") return "The person receiving claims from now on; send them the schedule's address."
+    if (action === "transfer") return "The person receiving claims from now on; send them the schedule code."
     if (action === "import") return "It's in your list. Choose it to see what you can claim."
-    if (action === "connect") return "Connected. Your schedules are below; if someone sent you one, paste its address."
+    if (action === "connect") return "Connected. Your schedules are below; if someone sent you one, paste its schedule code."
     return ""
+}
+
+/// "" when the paying account holds enough for the schedule, else what to say. `balance` is the
+/// account's LEZ in base units (text), `amount` the total in base units, `tranches` milestone parts.
+/// Base units (9 decimals) as "1,111.5 LEZ".
+export function lezText(base) {
+    var d = norm(base)
+    while (d.length < 10) d = "0" + d
+    var whole = d.slice(0, d.length - 9), frac = d.slice(d.length - 9).replace(/0+$/, "")
+    return grouped(whole) + (frac ? "." + frac : "") + " LEZ"
+}
+
+export function shortOfFunds(balance, amount, tranches) {
+    if (balance === null || balance === undefined || balance === "") return ""
+    var need = tranches && tranches.length ? sumAmounts(tranches.map(function(t) { return String(t || "0") })) : String(amount || "0")
+    if (!above(need, String(balance))) return ""
+    return "This schedule needs " + lezText(need) + ", and the paying account holds " + lezText(String(balance)) + ". Lower the amount, or add LEZ to the account first."
+}
+
+/// The words Names Wallet shows for a create: the LNS name the person typed, with the address.
+export function createSummary(built, typed) {
+    var name = String(typed == null ? "" : typed).trim()
+    var base = String((built && built.summary) || "")
+    if (name === "" || accountKind(name) !== "name") return base
+    return "Create a Vest schedule: " + ((built && built.amount_display) || "") + " from this account, to " + clean(name) + (built && built.beneficiary_base58 ? " (" + short(built.beneficiary_base58) + ")" : "")
 }
 
 /// What a Names write is called in its status line ("the cancel"), from the view's step name.

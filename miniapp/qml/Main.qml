@@ -260,7 +260,7 @@ Item {
 
     function doImport() {
         var a = Logic.accountInput(importField.text)
-        if (!a.ok) { say("Paste the schedule's address or the sender's LNS name.", true); return }
+        if (!a.ok) { say("Paste the schedule code, or the LNS name of the person paying you.", true); return }
         busy = true
         workingOn = "import"
         call("import_schedule", [a.account], function(r) {
@@ -356,14 +356,16 @@ Item {
     /// A change signed through Names Wallet: the module builds the call (`<method>` → {program,
     /// accounts_json, instruction_hex, summary, caller}), Names shows it and the person approves,
     /// choosing `caller`. `done(built, status)` runs once Names says it was sent.
-    function namesWrite(what, method, args, done) {
+    function namesWrite(what, method, args, done, summaryFor) {
         say("")
         busy = true
         workingOn = what
         call(method, args, function(r) {
             if (!r.ok) { busy = false; workingOn = ""; say(r.error, true); return }
             var thing = Logic.writeWhat(what)
-            wallet.proposeCall(r.program, r.accounts_json, r.instruction_hex, r.summary, {
+            // The summary Names shows is Vest's own words: say the LNS name the person typed, not only an address.
+            var summary = summaryFor ? summaryFor(r) : r.summary
+            wallet.proposeCall(r.program, r.accounts_json, r.instruction_hex, summary, {
                 sent: function(v) {
                     root.writeRequest = { request: v.request, built: r, done: done, what: thing }
                     root.say("In Names Wallet, choose " + Logic.labelled(r.caller, root.names) + " and approve. You come back here after.")
@@ -388,17 +390,21 @@ Item {
         var t = beneficiaryField.text.trim()
         if (t === "") { payee = null; return }
         payee = { ok: false, checking: true, text: "Checking " + t + "…" }
-        if (namesState === "connected" && Logic.accountKind(t) === "name") {
-            wallet.resolve(t, function(r) {
-                if (beneficiaryField.text.trim() !== t) return
-                payee = Logic.payeeFromNames(t, r)
-            })
-            return
+        // Ask Names Wallet and Vest's own lookup (it reads the chain directly) at once; the first
+        // answer wins, so a busy Names Wallet (catching up with the chain) never leaves this spinning.
+        var answered = false
+        var settle = function(v) {
+            if (answered || beneficiaryField.text.trim() !== t) return
+            if (v.checking) return
+            answered = true
+            payee = v
         }
-        call("resolve_name", [t], function(r) {
-            if (beneficiaryField.text.trim() !== t) return
-            payee = Logic.payeeLine(t, r)
-        }, 30000)
+        if (namesState === "connected" && Logic.accountKind(t) === "name")
+            wallet.resolve(t, function(r) {
+                var v = Logic.payeeFromNames(t, r)
+                if (!v.retry) settle(v)
+            })
+        call("resolve_name", [t], function(r) { settle(Logic.payeeLine(t, r)) }, 30000)
     }
 
     Timer { id: payeeTimer; interval: 700; onTriggered: root.checkPayee() }
@@ -415,7 +421,12 @@ Item {
         p.tranches = cKind === "milestone" ? cTranches.map(amountOf) : []
         var v = Logic.validateCreate(p)
         if (!v.ok) { say(v.errors[0], true); return }
+        // Enough LEZ in the paying account? Say so here, before Names Wallet is asked.
+        var payer = findById(publicAccounts, cCreator)
+        var short = Logic.shortOfFunds(payer ? payer.balance : null, p.amount, p.tranches)
+        if (short !== "") { say(short, true); return }
         var looked = found !== "" ? root.payee.resolved : []
+        var typed = beneficiaryField.text.trim()
         namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
             justCreated = true
             call("import_schedule", [built.schedule_address], function(imp) {
@@ -424,7 +435,7 @@ Item {
                     false, Logic.nextLine("create", { id: id }))
                 refresh()
             }, 60000)
-        })
+        }, function(built) { return Logic.createSummary(built, typed) })
     }
 
     function askGrave(kind, s) { sheet = { kind: kind, schedule: s } }
@@ -596,7 +607,7 @@ Item {
             Card {
                 visible: root.tab === "receive" && root.connected && root.recipientSchedules.length === 0
                 Heading { text: "No schedules for your accounts yet" }
-                Body { text: "A schedule shows up here once someone pays you through Vest and you add it. Ask the person paying you for the schedule's address, or for their LNS name, and paste it below." }
+                Body { text: "A schedule shows up here once someone pays you through Vest and you add it. Ask the person paying you for the schedule code (Vest gives it to them), or for their LNS name, and paste it below." }
                 ImportRow {}
             }
 
@@ -632,9 +643,9 @@ Item {
                 RowLayout {
                     visible: !!(root.selected && root.selected.address)
                     spacing: 16
-                    Text { textFormat: Text.PlainText; text: "Address"; color: look.dim; font.family: look.sans; font.pixelSize: look.px(14); Layout.preferredWidth: look.px(132) }
+                    Text { textFormat: Text.PlainText; text: "Schedule code"; color: look.dim; font.family: look.sans; font.pixelSize: look.px(14); Layout.preferredWidth: look.px(132) }
                     Text { textFormat: Text.PlainText; text: root.selected && root.selected.address ? Logic.short(root.selected.address) : ""; color: look.ink; font.family: look.mono; font.pixelSize: look.px(13) }
-                    Link { look: root.look; text: "Copy"; onPressed: root.copy(root.selected.address, "Schedule address") }
+                    Link { look: root.look; text: "Copy schedule code"; onPressed: root.copy(root.selected.address, "Schedule code") }
                 }
 
                 // Claim: where to, then the confirmation.
@@ -689,7 +700,7 @@ Item {
             Card {
                 visible: root.tab === "receive" && root.recipientSchedules.length > 0
                 Heading { text: "Add a schedule" }
-                Body { text: "Someone set up another schedule for you? Paste its address, or the sender's LNS name." }
+                Body { text: "Someone set up another schedule for you? Paste its schedule code, or the LNS name of the person paying you." }
                 ImportRow {}
             }
 
@@ -697,7 +708,7 @@ Item {
                 visible: root.tab === "receive" && root.selected !== null
                 look: root.look
                 summary: root.selected && root.selected.address ? "Schedule " + Logic.short(root.selected.address) : ""
-                FactRow { look: root.look; key: "Schedule address"; value: root.selected && root.selected.address ? root.selected.address : ""; monospace: true }
+                FactRow { look: root.look; key: "Schedule code"; value: root.selected && root.selected.address ? root.selected.address : ""; monospace: true }
                 FactRow { look: root.look; key: "Receives"; value: root.selected ? root.selected.beneficiary : ""; monospace: true }
                 FactRow { look: root.look; key: "Creator"; value: root.selected ? root.selected.creator : ""; monospace: true }
                 FactRow { look: root.look; key: "Token"; value: root.selected ? root.selected.token : ""; monospace: true }
@@ -856,6 +867,8 @@ Item {
                             text: "Receives " + Logic.labelled(managed.modelData.beneficiary, root.names) + " · claimed " + managed.modelData.claimed_display
                                 + (managed.modelData.cancelled ? " · cancelled" : Logic.isFullyClaimed(managed.modelData) ? " · fully claimed" : managed.modelData.cancelable ? "" : " · permanent")
                         }
+                        Link { look: root.look; visible: !!managed.modelData.address; text: "Copy schedule code"; onPressed: root.copy(managed.modelData.address, "Schedule code") }
+
                         Flow {
                             visible: root.canWrite && !Logic.isClosed(managed.modelData)
                             Layout.fillWidth: true
@@ -1055,7 +1068,7 @@ Item {
     component ImportRow: RowLayout {
         Layout.fillWidth: true
         spacing: 8
-        Field { id: importInput; look: root.look; Layout.fillWidth: true; hint: "Schedule address or LNS name"; onTextChanged: importField.text = text }
+        Field { id: importInput; look: root.look; Layout.fillWidth: true; hint: "Schedule code, or the payer's LNS name"; onTextChanged: importField.text = text }
         Action {
             look: root.look; changes: true; busy: root.busy
             label: "Add schedule"; busyLabel: "Adding…"; working: root.workingOn === "import"
