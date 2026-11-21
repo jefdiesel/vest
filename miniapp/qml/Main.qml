@@ -431,8 +431,14 @@ Item {
             justCreated = true
             call("import_schedule", [built.schedule_address], function(imp) {
                 var id = imp.ok ? imp.id : ""
-                say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + "."]).join(" "),
-                    false, Logic.nextLine("create", { id: id }))
+                var payerAcct = findById(publicAccounts, cCreator)
+                    var shown = function(nm) {
+                        say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + "."]).join(" "),
+
+                            false, Logic.nextLine("create", { id: id, name: nm }))
+                    }
+                    if (payerAcct && payerAcct.base58) wallet.reverse(payerAcct.base58, function(rv) { shown(rv && rv.ok && rv.name ? rv.name : "") })
+                    else shown("")
                 refresh()
             }, 60000)
         }, function(built) { return Logic.createSummary(built, typed) })

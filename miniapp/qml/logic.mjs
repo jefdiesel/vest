@@ -611,7 +611,7 @@ export function guideSteps(role, at) {
         ? ["Connect Names Wallet",
            "Choose who, how much and the schedule",
            "Approve it in Names Wallet",
-           "Send them the schedule code, or your LNS name",
+           "Tell them your LNS name, so their Vest can find it",
            "Cancel it, or make it permanent, later if you need to"]
         : ["Connect Names Wallet",
            "Your schedules appear here (or paste the address someone sent you)",
@@ -622,7 +622,7 @@ export function guideSteps(role, at) {
         ? ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Below: the account that pays, the person (address or LNS name), the amount, and when it unlocks.",
            "Names Wallet shows the payment and its fee. Nothing leaves your account until you approve.",
-           "They add the schedule in their own Vest with that address or name, then claim as it unlocks.",
+           "In their Vest they open Receive, type your LNS name and press Add schedule: Vest finds what you made for them. No LNS name? Send the schedule code instead (Copy schedule code).",
            "Cancel stops what hasn't unlocked and returns it to you. Permanent means nobody can cancel."]
         : ["Names Wallet asks you which of your accounts Vest may see. You approve it in Names Wallet; Vest never sees a key.",
            "Schedules paid to your accounts show up by themselves. If not, paste the address or LNS name the sender gave you.",
@@ -672,7 +672,9 @@ export function timeline(kind) {
 /// What happens next, after each action: one line for the Result line.
 export function nextLine(action, info) {
     info = info || {}
-    if (action === "create") return "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below) or your LNS name, so they can add it in Vest."
+    if (action === "create") return info.name
+        ? "Schedule " + info.id + " is live. Tell them your LNS name, " + clean(info.name) + ": in their Vest they open Receive, type " + clean(info.name) + " and press Add schedule."
+        : "Schedule " + info.id + " is live. Send them its schedule code (Copy schedule code, below): in their Vest they open Receive, paste it and press Add schedule."
     if (action === "batch") return "The schedules are live. Send each person their schedule code, or your LNS name."
     if (action === "claim") return "The tokens are in your account. Come back when more unlocks" + (info.next ? " (" + info.next + ")" : "") + "."
     if (action === "cancel") return "Nothing more unlocks. What had already unlocked stays theirs to claim."
