@@ -1,0 +1,138 @@
+# Basecamp packages for Linux: the `vesting` core module and the `vesting_ui` app as portable
+# .lgx files for linux-amd64 and linux-arm64, built the way the module catalog's release action
+# builds them (`nix build .#lgx-portable` on GitHub-hosted runners, reading the Logos nix cache),
+# from the staged copy miniapp/module/stage.sh makes. Each leg checks that the plugin loads
+# (miniapp/tools/linuxcheck.py); a last job merges the two Linux variants into one .lgx per
+# package. The darwin-arm64 variant is built on a Mac and merged in the same way (lgx merge).
+name: lgx
+
+on:
+  push:
+    branches: [linux-lgx]
+    paths:
+      - 'miniapp/**'
+      - 'core/**'
+      - 'sdk/**'
+      - 'program/**'
+      - 'vendor/**'
+      - '.github/workflows/lgx.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: lgx-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: linux-amd64, runner: ubuntu-24.04, system: x86_64-linux }
+          - { variant: linux-arm64, runner: ubuntu-24.04-arm, system: aarch64-linux }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      # risc0, rocksdb and the LEZ wallet compiled inside the nix store need far more than the
+      # runner image leaves free.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/boost \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/local/lib/node_modules || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
+
+      - uses: logos-co/setup-nix-cache-action@781f072122f4df6af0e33a7d355ebd20283e019e # v1.2.0
+
+      - name: Stage the packages
+        run: miniapp/module/stage.sh "$RUNNER_TEMP/stage"
+
+      - name: Build the vesting module (${{ matrix.variant }})
+        working-directory: ${{ runner.temp }}/stage/module
+        run: |
+          nix build .#lgx-portable -L --accept-flake-config -o "$RUNNER_TEMP/result-module"
+          nix build .#lib --accept-flake-config -o "$RUNNER_TEMP/result-lib"
+
+      - name: Build the vesting_ui app (${{ matrix.variant }})
+        working-directory: ${{ runner.temp }}/stage/app
+        run: |
+          nix build .#lgx-portable -L --accept-flake-config \
+            --override-input vesting "path:$RUNNER_TEMP/stage/module" -o "$RUNNER_TEMP/result-app"
+
+      - name: Set up lgx
+        run: |
+          nix build github:logos-co/logos-package#lgx --accept-flake-config -o "$RUNNER_TEMP/lgx-tool"
+          echo "$RUNNER_TEMP/lgx-tool/bin" >> "$GITHUB_PATH"
+
+      - name: Collect and verify the packages
+        run: |
+          mkdir -p out
+          vm=$(jq -r .version "$RUNNER_TEMP/stage/module/metadata.json")
+          va=$(jq -r .version "$RUNNER_TEMP/stage/app/metadata.json")
+          install -m 644 "$RUNNER_TEMP"/result-module/*.lgx "out/vesting-$vm-${{ matrix.variant }}.lgx"
+          install -m 644 "$RUNNER_TEMP"/result-app/*.lgx "out/vesting_ui-$va-${{ matrix.variant }}.lgx"
+          for f in out/*.lgx; do
+            lgx verify "$f"
+            lgx manifest "$f" --json | jq -c '{name, version, main}'
+          done
+
+      - name: Load check (the plugin dlopens; nothing missing from the portable bundle)
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/x" && mkdir -p "$RUNNER_TEMP/x"
+          lgx extract out/vesting-*-${{ matrix.variant }}.lgx --variant ${{ matrix.variant }} --output "$RUNNER_TEMP/x"
+          # The Qt the plugin was built against, which Basecamp's host provides at run time.
+          qt=$(nix-store -qR "$(readlink -f "$RUNNER_TEMP/result-lib")" | grep -E -- '-(qtbase|qtremoteobjects|qtdeclarative)-[0-9]' | sed 's|$|/lib|')
+          # A python on the build's own glibc: the builder's nixpkgs, as the flake locks it.
+          py=$(nix build --impure --no-link --print-out-paths --expr \
+            "(builtins.getFlake \"path:$RUNNER_TEMP/stage/module\").inputs.logos-module-builder.inputs.nixpkgs.legacyPackages.${{ matrix.system }}.python3")/bin/python3
+          "$py" miniapp/tools/linuxcheck.py "$(readlink -f "$RUNNER_TEMP/result-lib")" "$RUNNER_TEMP/x" $qt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lgx-${{ matrix.variant }}
+          path: out/*.lgx
+          if-no-files-found: error
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: logos-co/setup-nix-cache-action@781f072122f4df6af0e33a7d355ebd20283e019e # v1.2.0
+      - name: Set up lgx
+        run: |
+          nix build github:logos-co/logos-package#lgx --accept-flake-config -o "$RUNNER_TEMP/lgx-tool"
+          echo "$RUNNER_TEMP/lgx-tool/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lgx-*
+          path: per-variant
+          merge-multiple: true
+      # One .lgx per package carrying both Linux variants (as the catalog's release action does).
+      # Fold the darwin-arm64 file from a Mac build in the same way:
+      #   lgx merge vesting-<v>-linux.lgx vesting-<v>-darwin-arm64.lgx -o vesting-<v>.lgx -y
+      - name: Merge the Linux variants
+        run: |
+          set -euo pipefail
+          mkdir -p linux
+          for pkg in vesting vesting_ui; do
+            files=(per-variant/"$pkg"-[0-9]*-linux-*.lgx)
+            v=$(basename "${files[0]}" .lgx); v=${v#"$pkg"-}; v=${v%-linux-*}
+            lgx merge "${files[@]}" -o "linux/$pkg-$v-linux.lgx" -y
+            lgx verify "linux/$pkg-$v-linux.lgx"
+            lgx manifest "linux/$pkg-$v-linux.lgx" --json | jq -c '{name, version, main}'
+          done
+          cp per-variant/*.lgx linux/
+          (cd linux && sha256sum *.lgx > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vest-lgx-linux
+          path: linux/*
+          if-no-files-found: error
