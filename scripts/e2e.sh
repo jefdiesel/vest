@@ -16,7 +16,7 @@
 # Writes $W/program.hex (the vesting program id) for the event check, and $W/RESULTS.txt.
 set -uo pipefail
 : "${V:?}" "${RPC:?}" "${W:?}" "${VESTING_ELF:?}" "${TOKEN_ELF:?}"
-PAYER_KEY=${PAYER_KEY:-10a26a9aec7d34b82364eeae45c5294dbb0a764b000b94eeb9b58511dc487c4d}
+PAYER_KEY=${PAYER_KEY:-$("$(dirname "${BASH_SOURCE[0]}")/lez-test-key.sh")} || exit 1 # LEZ published local-test key, read from LEZ
 mkdir -p "$W"; RES=$W/RESULTS.txt; : > "$RES"
 WC=${CREATOR_WALLET:-$W/wallet-creator}; WB=$W/wallet-bene; MAP=$W/ids.json
 export LEE_WALLET_PASSWORD=
