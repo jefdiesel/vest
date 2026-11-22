@@ -1,6 +1,7 @@
 {
   "name": "vesting_ui",
   "display_name": "Vest",
+  "author": "lns:names",
   "version": "0.6.2",
   "type": "ui_qml",
   "category": "finance",
