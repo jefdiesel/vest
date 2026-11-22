@@ -47,7 +47,9 @@ impl fmt::Display for NameError {
             NameError::ExpiredName { name, expires } => {
                 write!(f, "LNS name '{}' expired at {} ms", name, expires)
             }
-            NameError::NoOwner { name } => write!(f, "LNS name '{}' publishes no account to pay", name),
+            NameError::NoOwner { name } => {
+                write!(f, "LNS name '{}' publishes no account to pay", name)
+            }
             NameError::Rpc(message) => write!(f, "LNS lookup failed: {}", message),
         }
     }

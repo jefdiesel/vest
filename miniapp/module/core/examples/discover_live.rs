@@ -30,14 +30,23 @@ fn main() {
     if std::env::var("VEST_GUARD").is_ok() {
         module.guard_local_rpc(vesting_sdk::rpc_guard::Policy::default());
     }
-    let most: usize = std::env::var("VEST_CALLS").ok().and_then(|n| n.parse().ok()).unwrap_or(200);
+    let most: usize = std::env::var("VEST_CALLS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(200);
     let cfg: Value = serde_json::from_str(&module.configure(
         &json!({ "signer": "names", "network_file": file.display().to_string() }).to_string(),
     ))
     .unwrap();
     assert_eq!(cfg["ok"], true, "{cfg}");
-    let rows: Vec<Value> = accounts.iter().map(|a| json!({ "account": format!("Public/{a}") })).collect();
-    println!("set_accounts {}", module.set_accounts(&Value::Array(rows).to_string()));
+    let rows: Vec<Value> = accounts
+        .iter()
+        .map(|a| json!({ "account": format!("Public/{a}") }))
+        .collect();
+    println!(
+        "set_accounts {}",
+        module.set_accounts(&Value::Array(rows).to_string())
+    );
     let all = Instant::now();
     let mut calls = 0;
     loop {
@@ -54,16 +63,31 @@ fn main() {
             break;
         }
     }
-    println!("whole scan: {:.0} s, {calls} calls", all.elapsed().as_secs_f64());
-    let state: Value = serde_json::from_slice(&std::fs::read(dir.join("vesting-discover.json")).unwrap()).unwrap();
+    println!(
+        "whole scan: {:.0} s, {calls} calls",
+        all.elapsed().as_secs_f64()
+    );
+    let state: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("vesting-discover.json")).unwrap()).unwrap();
     let schedules = state["schedules"].as_object().unwrap();
     println!("schedule accounts found on the chain: {}", schedules.len());
     for a in schedules.keys() {
         println!("  {a}");
     }
-    println!("other accounts Vest touched: {}", state["touched"].as_object().unwrap().len() - schedules.len());
-    let answer: Value = serde_json::from_str(&module.incoming(&json!(accounts).to_string())).unwrap();
+    println!(
+        "other accounts Vest touched: {}",
+        state["touched"].as_object().unwrap().len() - schedules.len()
+    );
+    let answer: Value =
+        serde_json::from_str(&module.incoming(&json!(accounts).to_string())).unwrap();
     for row in answer["schedules"].as_array().unwrap() {
-        println!("incoming {} from {} total {} claimable {} status {}", row["address_base58"], row["creator_base58"], row["total_display"], row["claimable_display"], row["status"]);
+        println!(
+            "incoming {} from {} total {} claimable {} status {}",
+            row["address_base58"],
+            row["creator_base58"],
+            row["total_display"],
+            row["claimable_display"],
+            row["status"]
+        );
     }
 }

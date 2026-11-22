@@ -100,7 +100,13 @@ fn range_with(from: u64, to: u64, at: u64, fixture: Value) -> Value {
     let real = fixture.as_array().unwrap()[0].clone();
     Value::Array(
         (from..=to)
-            .map(|id| if id == at { real.clone() } else { empty_block(id) })
+            .map(|id| {
+                if id == at {
+                    real.clone()
+                } else {
+                    empty_block(id)
+                }
+            })
             .collect(),
     )
 }
@@ -153,7 +159,10 @@ fn give(module: &mut Module, accounts: &[&str]) {
         .iter()
         .map(|a| json!({ "account": format!("Public/{a}"), "account_kind": "public" }))
         .collect();
-    assert_eq!(parse(module.set_accounts(&Value::Array(rows).to_string()))["ok"], true);
+    assert_eq!(
+        parse(module.set_accounts(&Value::Array(rows).to_string()))["ok"],
+        true
+    );
 }
 
 /// The answers of the start of a call: the chain id and the tip.
@@ -195,18 +204,33 @@ fn real_blocks_decode_to_the_accounts_vest_touched() {
             .collect()
     };
     // Each block has three transactions; only the Vest one names Vest's accounts.
-    assert_eq!(discover::decode_blocks(&block_38738()).unwrap()[0].body.transactions.len(), 3);
+    assert_eq!(
+        discover::decode_blocks(&block_38738()).unwrap()[0]
+            .body
+            .transactions
+            .len(),
+        3
+    );
     assert_eq!(
         shown(block_38738()),
-        vec![(38738, S1.into(), TX1.into()), (38738, CREATOR.into(), TX1.into())]
+        vec![
+            (38738, S1.into(), TX1.into()),
+            (38738, CREATOR.into(), TX1.into())
+        ]
     );
     assert_eq!(
         shown(block_38748()),
-        vec![(38748, S2.into(), TX_CREATE2.into()), (38748, CREATOR.into(), TX_CREATE2.into())]
+        vec![
+            (38748, S2.into(), TX_CREATE2.into()),
+            (38748, CREATOR.into(), TX_CREATE2.into())
+        ]
     );
     assert_eq!(
         shown(block_38752()),
-        vec![(38752, PAYEE.into(), TX_TRANSFER.into()), (38752, S2.into(), TX_TRANSFER.into())]
+        vec![
+            (38752, PAYEE.into(), TX_TRANSFER.into()),
+            (38752, S2.into(), TX_TRANSFER.into())
+        ]
     );
     // Another program id finds nothing in the same bytes.
     let other = discover::decode_blocks(&block_38738()).unwrap();
@@ -222,14 +246,25 @@ fn a_real_view_decodes_to_its_schedule_and_beneficiary() {
     let client = RpcClient::new(rpc.clone());
     rpc.push_ok("getAccountView", view_s1());
     rpc.push_ok("getAccountView", view_creator());
-    let state = discover::read_state(&client, &id(S1), &id(PROGRAM)).unwrap().unwrap();
+    let state = discover::read_state(&client, &id(S1), &id(PROGRAM))
+        .unwrap()
+        .unwrap();
     let s = state.schedule.unwrap();
     assert_eq!(names::base58(&s.creator), CREATOR);
     assert_eq!(names::base58(&s.beneficiary), PAYEE);
     assert_eq!((s.total, s.claimed), (600_000, 81_385));
-    assert!(matches!(s.kind, vesting_core::ScheduleKind::Linear { start: 1795194308000, end: 1795194638000 }));
+    assert!(matches!(
+        s.kind,
+        vesting_core::ScheduleKind::Linear {
+            start: 1795194308000,
+            end: 1795194638000
+        }
+    ));
     // The creator's own account holds no Vest state (an empty list under the program).
-    assert_eq!(discover::read_state(&client, &id(CREATOR), &id(PROGRAM)).unwrap(), None);
+    assert_eq!(
+        discover::read_state(&client, &id(CREATOR), &id(PROGRAM)).unwrap(),
+        None
+    );
 }
 
 // ── discover ─────────────────────────────────────────────────────────────────────────
@@ -305,7 +340,11 @@ fn an_account_shared_later_gets_its_schedules_without_new_blocks() {
     rpc.push_ok("getAccountView", view_s1());
     rpc.push_ok("getAccountView", view_creator());
     let first = parse(module.discover(""));
-    assert_eq!((first["found"].clone(), first["incoming"].clone()), (json!([]), json!(0)), "{first}");
+    assert_eq!(
+        (first["found"].clone(), first["incoming"].clone()),
+        (json!([]), json!(0)),
+        "{first}"
+    );
     // Names Wallet shares the payee's account: the next call imports it from the saved scan.
     give(&mut module, &[PAYEE]);
     start(&rpc, 38738);
@@ -323,7 +362,10 @@ fn discover_resumes_and_reads_at_most_max_blocks() {
     give(&mut module, &[PAYEE]);
     // 150 blocks of a far tip: two ranges, 100 then 50.
     start(&rpc, 50_000);
-    rpc.push_ok("getBlockRange", range_with(38738, 38837, 38738, block_38738()));
+    rpc.push_ok(
+        "getBlockRange",
+        range_with(38738, 38837, 38738, block_38738()),
+    );
     rpc.push_ok("getAccountView", view_s1());
     rpc.push_ok("getAccountView", view_creator());
     rpc.push_ok("getBlockRange", empty_range(38838, 38887));
@@ -352,10 +394,16 @@ fn discover_resumes_and_reads_at_most_max_blocks() {
     assert_eq!(second["done"], true);
     assert_eq!(second["found"], json!([]));
     assert_eq!(second["incoming"], 1);
-    assert_eq!(calls(&rpc, "getBlockRange").last().unwrap(), &json!([38888, 38900]));
+    assert_eq!(
+        calls(&rpc, "getBlockRange").last().unwrap(),
+        &json!([38888, 38900])
+    );
     // The default is 2000 blocks; more than the cap is cut to it; 0 and words are refused.
     assert_eq!(discover::parse_max_blocks("").unwrap(), 2000);
-    assert_eq!(discover::parse_max_blocks("99999999").unwrap(), discover::MAX_BLOCKS_CAP);
+    assert_eq!(
+        discover::parse_max_blocks("99999999").unwrap(),
+        discover::MAX_BLOCKS_CAP
+    );
     assert_eq!(parse(again.discover("0"))["ok"], false);
     assert_eq!(parse(again.discover("lots"))["ok"], false);
 }
@@ -409,7 +457,10 @@ fn another_chain_id_starts_over_from_the_floor() {
     let saved = discover::ScanState::load(&module.dir).unwrap();
     assert_eq!(saved.chain_id, "ab".repeat(32));
     assert!(saved.touched.is_empty());
-    assert_eq!(calls(&rpc, "getBlockRange").last().unwrap(), &json!([38738, 38800]));
+    assert_eq!(
+        calls(&rpc, "getBlockRange").last().unwrap(),
+        &json!([38738, 38800])
+    );
 }
 
 #[test]
@@ -424,10 +475,17 @@ fn a_transfer_away_is_read_again() {
     rpc.push_ok("getAccountView", view_creator());
     rpc.push_ok("getAccountView", view_s2_before_transfer()); // import
     let made = parse(module.discover(""));
-    assert_eq!((made["found"].clone(), made["incoming"].clone()), (json!([S2]), json!(1)), "{made}");
+    assert_eq!(
+        (made["found"].clone(), made["incoming"].clone()),
+        (json!([S2]), json!(1)),
+        "{made}"
+    );
     // Block 38752 moves it to BDetF: the scan reads it again, and it no longer pays 5g78o.
     start(&rpc, 38752);
-    rpc.push_ok("getBlockRange", range_with(38749, 38752, 38752, block_38752()));
+    rpc.push_ok(
+        "getBlockRange",
+        range_with(38749, 38752, 38752, block_38752()),
+    );
     rpc.push_ok("getAccountView", view_payee());
     rpc.push_ok("getAccountView", view_s2());
     let moved = parse(module.discover(""));
@@ -435,7 +493,10 @@ fn a_transfer_away_is_read_again() {
     assert_eq!(moved["changed"], true, "{moved}");
     assert_eq!(moved["incoming"], 0);
     assert_eq!(viewed(&rpc)[3..], [PAYEE, S2]);
-    assert_eq!(parse(module.incoming(&json!([PAYEE]).to_string()))["schedules"], json!([]));
+    assert_eq!(
+        parse(module.incoming(&json!([PAYEE]).to_string()))["schedules"],
+        json!([])
+    );
     let theirs = parse(module.incoming(&json!([NEW_PAYEE]).to_string()));
     assert_eq!(theirs["schedules"][0]["address_base58"], S2);
     // Both milestones signalled and all claimed: closed.
@@ -443,7 +504,10 @@ fn a_transfer_away_is_read_again() {
     let saved = discover::ScanState::load(&module.dir).unwrap();
     assert_eq!(
         saved.touched[S2],
-        vec![(38748, TX_CREATE2.to_string()), (38752, TX_TRANSFER.to_string())]
+        vec![
+            (38748, TX_CREATE2.to_string()),
+            (38752, TX_TRANSFER.to_string())
+        ]
     );
 }
 
@@ -458,9 +522,16 @@ fn a_transfer_to_you_is_found() {
     rpc.push_ok("getAccountView", view_s2_before_transfer());
     rpc.push_ok("getAccountView", view_creator());
     let before = parse(module.discover(""));
-    assert_eq!((before["found"].clone(), before["incoming"].clone()), (json!([]), json!(0)), "{before}");
+    assert_eq!(
+        (before["found"].clone(), before["incoming"].clone()),
+        (json!([]), json!(0)),
+        "{before}"
+    );
     start(&rpc, 38752);
-    rpc.push_ok("getBlockRange", range_with(38749, 38752, 38752, block_38752()));
+    rpc.push_ok(
+        "getBlockRange",
+        range_with(38749, 38752, 38752, block_38752()),
+    );
     rpc.push_ok("getAccountView", view_payee());
     rpc.push_ok("getAccountView", view_s2());
     rpc.push_ok("getAccountView", view_s2()); // import
@@ -484,7 +555,8 @@ fn incoming_sorts_schedules_into_unvested_claimable_and_closed() {
     let (me, other) = ([2u8; 32], [3u8; 32]);
     let day = 86_400_000;
     let linear = |start: u64, end: u64, beneficiary: [u8; 32]| {
-        let p = vesting_core::CreateParams::linear([1; 32], beneficiary, [0; 32], 1_000, start, end);
+        let p =
+            vesting_core::CreateParams::linear([1; 32], beneficiary, [0; 32], 1_000, start, end);
         vesting_core::create(p, 0).unwrap().0
     };
     let unvested = linear(now + day, now + 2 * day, me);
@@ -492,14 +564,24 @@ fn incoming_sorts_schedules_into_unvested_claimable_and_closed() {
     let mut claimed = linear(now - 2 * day, now - day, me);
     claimed.claimed = 1_000;
     let mut cancelled = linear(now - 2 * day, now + day, me);
-    cancelled.cancelled = Some(vesting_core::CancelRecord { at: now - day, vested_at_cancel: 300 });
+    cancelled.cancelled = Some(vesting_core::CancelRecord {
+        at: now - day,
+        vested_at_cancel: 300,
+    });
     cancelled.claimed = 300;
     let not_mine = linear(now - day, now + day, other);
     let mut state = discover::ScanState::fresh(CHAIN, &id(PROGRAM), 0);
-    for (i, s) in [&unvested, &claimable, &claimed, &cancelled, &not_mine].into_iter().enumerate() {
+    for (i, s) in [&unvested, &claimable, &claimed, &cancelled, &not_mine]
+        .into_iter()
+        .enumerate()
+    {
         state.schedules.insert(
             names::base58(&[10 + i as u8; 32]),
-            discover::Known { schedule: hex::encode(borsh::to_vec(s).unwrap()), native: true, block: 1 },
+            discover::Known {
+                schedule: hex::encode(borsh::to_vec(s).unwrap()),
+                native: true,
+                block: 1,
+            },
         );
     }
     state.save(&module.dir).unwrap();
@@ -509,7 +591,15 @@ fn incoming_sorts_schedules_into_unvested_claimable_and_closed() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|r| (r["address_base58"].as_str().unwrap().to_string(), (r["status"].as_str().unwrap().to_string(), r["next_unlock_ms"].clone())))
+        .map(|r| {
+            (
+                r["address_base58"].as_str().unwrap().to_string(),
+                (
+                    r["status"].as_str().unwrap().to_string(),
+                    r["next_unlock_ms"].clone(),
+                ),
+            )
+        })
         .collect();
     assert_eq!(by.len(), 4);
     let at = |i: u8| by[&names::base58(&[10 + i; 32])].clone();
@@ -520,10 +610,20 @@ fn incoming_sorts_schedules_into_unvested_claimable_and_closed() {
     assert_eq!(at(3), ("closed".to_string(), Value::Null));
     // Another network's scan is not answered from.
     let other_file = module.dir.join("other.json");
-    std::fs::write(&other_file, json!({ "format": "names-network/2", "lez": "0.4", "rpc": "http://127.0.0.1:9",
-        "programs": { "vesting": { "id": names::base58(&[7; 32]) } } }).to_string()).unwrap();
-    parse(module.configure(&json!({ "network_file": other_file.display().to_string() }).to_string()));
-    assert_eq!(parse(module.incoming(&json!([names::base58(&me)]).to_string()))["schedules"], json!([]));
+    std::fs::write(
+        &other_file,
+        json!({ "format": "names-network/2", "lez": "0.4", "rpc": "http://127.0.0.1:9",
+        "programs": { "vesting": { "id": names::base58(&[7; 32]) } } })
+        .to_string(),
+    )
+    .unwrap();
+    parse(
+        module.configure(&json!({ "network_file": other_file.display().to_string() }).to_string()),
+    );
+    assert_eq!(
+        parse(module.incoming(&json!([names::base58(&me)]).to_string()))["schedules"],
+        json!([])
+    );
     // Not a list of accounts: refused.
     assert_eq!(parse(module.incoming("nope"))["ok"], false);
     assert_eq!(parse(module.incoming(r#"["junk!"]"#))["ok"], false);
@@ -553,15 +653,24 @@ fn imports_are_a_few_per_call() {
     let schedule = vesting_core::create(p, 0).unwrap().0;
     let answer = {
         let full = vesting_program::ScheduleState {
-            version: 1, nonce: [9; 32], asset: vesting_program::Asset::Native,
-            schedule: Some(schedule.clone()), float: 0, per_claim: 0, pending: None,
+            version: 1,
+            nonce: [9; 32],
+            asset: vesting_program::Asset::Native,
+            schedule: Some(schedule.clone()),
+            float: 0,
+            per_claim: 0,
+            pending: None,
         };
         json!({ "data": { "actor_states": { PROGRAM: borsh::to_vec(&full).unwrap() } } })
     };
     for i in 0..7u8 {
         state.schedules.insert(
             names::base58(&[40 + i; 32]),
-            discover::Known { schedule: hex::encode(borsh::to_vec(&schedule).unwrap()), native: true, block: 38738 },
+            discover::Known {
+                schedule: hex::encode(borsh::to_vec(&schedule).unwrap()),
+                native: true,
+                block: 38738,
+            },
         );
     }
     state.save(&module.dir).unwrap();
@@ -639,7 +748,10 @@ fn short_or_gapped_block_range_never_skips_blocks() {
     give(&mut module, &[PAYEE]);
     // RPC returns only 38738..=38739 for [38738, 38741]: next range must start at 38740.
     start(&rpc, 38741);
-    rpc.push_ok("getBlockRange", range_with(38738, 38739, 38738, block_38738()));
+    rpc.push_ok(
+        "getBlockRange",
+        range_with(38738, 38739, 38738, block_38738()),
+    );
     rpc.push_ok("getAccountView", view_s1());
     rpc.push_ok("getAccountView", view_creator());
     rpc.push_ok("getBlockRange", empty_range(38740, 38741));

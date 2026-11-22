@@ -143,7 +143,10 @@ impl ScanState {
 
 /// The accounts the Vest program `program` touched in `block`, each with the transaction's hash
 /// (hex), in the block's order: the actors whose program account is Vest's.
-pub fn vest_accounts(block: &common::block::Block, program: &AccountId) -> Vec<(AccountId, String)> {
+pub fn vest_accounts(
+    block: &common::block::Block,
+    program: &AccountId,
+) -> Vec<(AccountId, String)> {
     let mut out = Vec::new();
     for tx in &block.body.transactions {
         let context = match tx {
@@ -154,7 +157,10 @@ pub fn vest_accounts(block: &common::block::Block, program: &AccountId) -> Vec<(
         for actor in &context.actors {
             if actor.program_account_id.value() == program {
                 let account = *actor.account_id.value();
-                if !out.iter().any(|(a, h): &(AccountId, String)| *a == account && *h == hash) {
+                if !out
+                    .iter()
+                    .any(|(a, h): &(AccountId, String)| *a == account && *h == hash)
+                {
                     out.push((account, hash.clone()));
                 }
             }
@@ -220,7 +226,12 @@ impl Pacer {
         self.last = Some(Instant::now());
     }
 
-    pub fn call(&mut self, client: &RpcClient, method: &str, params: Value) -> Result<Value, String> {
+    pub fn call(
+        &mut self,
+        client: &RpcClient,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, String> {
         self.wait();
         let answer = client.call(method, params);
         self.mark();
