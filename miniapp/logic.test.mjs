@@ -169,8 +169,66 @@ check("Vest's Names words are the SDK's shared ones", L.requestLine === SDK.requ
 check("zone check", [L.zoneProblem({ zone: { channel: "2DA7" } }, "2da7"), /Switch Names Wallet to the bridge test network/.test(L.zoneProblem({ zone: { channel: "01" } }, "2da7")), L.zoneProblem({}, "2da7")], ["", true, ""]);
 check("request lines", [L.requestLine({ state: "pending" }, "the claim"), L.requestLine({ state: "rejected" }, "the claim"), L.requestLine({ state: "done" }), L.requestOpen({ state: "running" }), L.requestOpen({ state: "done" })],
   ["Waiting for you to approve the claim in Names Wallet.", "You declined the claim in Names Wallet. Nothing was sent.", "", true, false]);
-check("namesAccounts joins balances", L.namesAccounts({ accounts: [{ account: "Public/A", account_kind: "public" }, { account: "Private/B", account_kind: "private" }] }, [{ account: "Public/A", balance: "12" }]),
-  [{ account: "Public/A", account_kind: "public", balance: "12" }, { account: "Private/B", account_kind: "private", balance: "0" }]);
+check("namesAccounts joins balances and keeps missing balances unknown (null)", L.namesAccounts({ accounts: [{ account: "Public/A", account_kind: "public" }, { account: "Private/B", account_kind: "private" }] }, [{ account: "Public/A", balance: "12" }]),
+  [{ account: "Public/A", account_kind: "public", balance: "12" }, { account: "Private/B", account_kind: "private", balance: null }]);
+check("namesAccounts keeps a real zero as \"0\" and unread/null/empty as null",
+  L.namesAccounts(
+    { accounts: [{ account: "Public/Z", account_kind: "public" }, { account: "Public/N", account_kind: "public" }, { account: "Public/E", account_kind: "public" }, { account: "Public/M", account_kind: "public" }] },
+    [{ account: "Public/Z", balance: "0" }, { account: "Public/N", balance: null }, { account: "Public/E", balance: "" }]
+  ),
+  [
+    { account: "Public/Z", account_kind: "public", balance: "0" },
+    { account: "Public/N", account_kind: "public", balance: null },
+    { account: "Public/E", account_kind: "public", balance: null },
+    { account: "Public/M", account_kind: "public", balance: null }
+  ]);
+check("namesAccounts with an empty balance list marks every account unknown",
+  L.namesAccounts({ accounts: [{ account: "Public/A", account_kind: "public" }] }, []),
+  [{ account: "Public/A", account_kind: "public", balance: null }]);
+check("balanceText: known amount, real zero, reading, and failed after retries", [
+  L.balanceText({ balance: "28431410", balance_display: "0.02843141 LEZ" }, false),
+  L.balanceText({ balance: "0", balance_display: "0 LEZ" }, false),
+  L.balanceText({ balance: "0", balance_display: "0 LEZ" }, true),
+  L.balanceText({ balance: "1000000000" }, false),
+  L.balanceText({ balance: null, balance_display: "Reading…" }, false),
+  L.balanceText({ balance: null, balance_display: "Reading…" }, true),
+  L.balanceText({ balance: "", balance_display: "" }, false),
+  L.balanceText({ balance: "  ", balance_display: "0 LEZ" }, false),
+  L.balanceText(null, false),
+  L.balanceText({}, true)
+], [
+  "0.02843141 LEZ",
+  "0 LEZ",
+  "0 LEZ",
+  "1 LEZ",
+  "Reading…",
+  "Balance not read · Refresh",
+  "Reading…",
+  "Reading…",
+  "Reading…",
+  "Balance not read · Refresh"
+]);
+check("balancesKnown: true when every public account has a balance (including 0), false when any is null", [
+  L.balancesKnown([{ account: "Public/A", account_kind: "public", balance: "0" }, { account: "Private/B", account_kind: "private", balance: null }]),
+  L.balancesKnown([{ account: "Public/A", account_kind: "public", balance: "10" }, { account: "Public/B", account_kind: "public", balance: null }]),
+  L.balancesKnown([{ account: "Public/A", account_kind: "public", balance: "" }]),
+  L.balancesKnown([])
+], [true, false, false, true]);
+check("balanceRetryDelay: 3 s, 6 s, 12 s, then stop (at most 4 tries)", [
+  L.balanceRetryDelay(0), L.balanceRetryDelay(1), L.balanceRetryDelay(2), L.balanceRetryDelay(3), L.balanceRetryDelay(4), L.balanceRetryDelay(5)
+], [0, 3000, 6000, 12000, 0, 0]);
+check("shortOfFunds: null balance can't check, real \"0\" catches shortfall", [
+  L.shortOfFunds(null, "1000"),
+  L.shortOfFunds("", "1000"),
+  L.shortOfFunds("0", "1000").startsWith("This schedule needs")
+], ["", "", true]);
+{
+  const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  check("Main.qml shows balances via balanceText and retries with one Timer", [
+    qml.includes("Logic.balanceText(modelData, root.balanceFailed)"),
+    qml.includes("Timer { id: balanceRetryTimer; repeat: false;")
+  ], [true, true]);
+}
 
 // ── Guides ────────────────────────────────────────────────────────────────────────
 check("guide: receiving, five one-line steps, current marked", L.guideSteps("receive", 2).map(s => s.state), ["done", "done", "now", "later", "later"]);

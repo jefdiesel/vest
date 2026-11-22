@@ -69,6 +69,12 @@ Item {
     property var shownAddr: ({})               // which receipt rows show their full address
     property bool autoTabDone: false           // the first read picked Unvested when nothing is claimable
 
+    // ── Balance retry (when Names Wallet isn't ready with balances yet) ────────────
+    property var balanceAccounts: []           // the granted accounts we are reading balances for
+    property int balanceTries: 0               // tries made so far (1 initial + 3 retries = 4)
+    property bool balanceFailed: false         // all tries failed: show "Balance not read · Refresh"
+    property int balanceGen: 0                 // bumped on each fresh read or disconnect
+
     // ── Finding schedules on the chain (the module's `discover`) ───────────────────
     property var scan: null                    // the last discover answer
     property bool scanBusy: false              // a discover call is out (one at a time)
@@ -152,19 +158,76 @@ Item {
     /// Where Names Wallet stands (installed and open, on our network, which accounts it gave),
     /// then the vesting module is told the accounts and the chain is read.
     function readNames() {
+        stopBalanceRetry()
         wallet.check({ chain: info && info.network ? info.network.chain_id : "" }, function(w) {
             if (w.state !== "connected") { loading = false; return }
             namesAccountsRead(w.accounts)
         })
     }
 
-    function namesAccountsRead(accounts) {
-        wallet.balances(function(b) {
-            call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, b))], function() { readChain() })
-        }, function() {
-            call("set_accounts", [JSON.stringify(Logic.namesAccounts({ accounts: accounts }, []))], function() { readChain() })
+    function stopBalanceRetry() {
+        balanceRetryTimer.stop()
+        balanceGen += 1
+        balanceTries = 0
+        balanceFailed = false
+        balanceAccounts = []
+    }
+
+    function readAccounts() {
+        call("accounts", [], function(a) {
+            if (!a.ok) return
+            accounts = a.accounts || []
+            if (cCreator === "" && publicAccounts.length) cCreator = publicAccounts[0].id
         })
     }
+
+    function scheduleBalanceRetry(gen) {
+        if (gen !== balanceGen) return
+        var wait = Logic.balanceRetryDelay(balanceTries)
+        if (wait > 0) {
+            balanceRetryTimer.interval = wait
+            balanceRetryTimer.restart()
+        } else {
+            balanceFailed = true
+        }
+    }
+
+    function namesAccountsRead(grantedAccounts) {
+        stopBalanceRetry()
+        balanceAccounts = grantedAccounts || []
+        balanceTries = 1
+        var gen = balanceGen
+        wallet.balances(function(b) {
+            if (gen !== balanceGen) return
+            var rows = Logic.namesAccounts({ accounts: balanceAccounts }, b)
+            call("set_accounts", [JSON.stringify(rows)], function() { readChain() })
+            if (!Logic.balancesKnown(rows)) scheduleBalanceRetry(gen)
+        }, function() {
+            if (gen !== balanceGen) return
+            var rows = Logic.namesAccounts({ accounts: balanceAccounts }, [])
+            call("set_accounts", [JSON.stringify(rows)], function() { readChain() })
+            if (!Logic.balancesKnown(rows)) scheduleBalanceRetry(gen)
+        })
+    }
+
+    function retryBalances() {
+        if (namesState !== "connected" || !balanceAccounts.length) { stopBalanceRetry(); return }
+        balanceTries += 1
+        var gen = balanceGen
+        wallet.balances(function(b) {
+            if (gen !== balanceGen) return
+            var rows = Logic.namesAccounts({ accounts: balanceAccounts }, b)
+            call("set_accounts", [JSON.stringify(rows)], function() {
+                if (gen === balanceGen) readAccounts()
+            })
+            if (Logic.balancesKnown(rows)) balanceFailed = false
+            else scheduleBalanceRetry(gen)
+        }, function() {
+            if (gen !== balanceGen) return
+            scheduleBalanceRetry(gen)
+        })
+    }
+    Timer { id: balanceRetryTimer; repeat: false; onTriggered: root.retryBalances() }
 
     /// 1. Connect: the person picks, in the Names app, which accounts Vest may see. The SDK takes
     /// them to Names (Basecamp's navigation intent, declared in metadata.json `uses`) and Names
@@ -204,11 +267,7 @@ Item {
     }
 
     function readChain() {
-        call("accounts", [], function(a) {
-            if (!a.ok) return
-            accounts = a.accounts || []
-            if (cCreator === "" && publicAccounts.length) cCreator = publicAccounts[0].id
-        })
+        readAccounts()
         call("now", [], function(n) { if (n.ok) effectiveTime = n.time })
         call("list", [], function(l) {
             loading = false
@@ -999,7 +1058,7 @@ Item {
                         required property var modelData
                         Layout.fillWidth: true
                         label: modelData.name ? modelData.name + " · " + Logic.short(modelData.base58) : Logic.short(modelData.base58)
-                        detail: modelData.balance_display
+                        detail: Logic.balanceText(modelData, root.balanceFailed)
                         chosen: root.cCreator === modelData.id
                         onPressed: root.cCreator = modelData.id
                     }
@@ -1157,7 +1216,7 @@ Item {
                 Heading { text: "Signing" }
                 Body { text: "Vest signs through Names Wallet: you approve every payment and claim in Names Wallet. Vest has no signer of its own." }
                 FactRow { look: root.look; visible: wallet.current !== null; key: "Wallet"; value: wallet.current ? Logic.clean(wallet.current.display_name) + " (" + Logic.clean(wallet.current.module) + ")" : "" }
-                Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
+                Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.stopBalanceRetry(); root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
                 Link { look: root.look; visible: wallet.wallets.length > 1; text: "Use another wallet"; onPressed: { wallet.forgetWallet(); root.refresh() } }
             }
 

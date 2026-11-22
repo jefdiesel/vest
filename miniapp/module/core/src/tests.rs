@@ -713,3 +713,29 @@ fn names_wallet_cancels_and_manages_a_schedule_with_calls_that_read_the_clock() 
         "{refused}"
     );
 }
+
+#[test]
+fn set_accounts_keeps_unknown_balance_distinct_from_zero() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc);
+    let input = json!([
+        { "account": format!("Public/{}", names::base58(&[1; 32])), "account_kind": "public", "balance": Value::Null },
+        { "account": format!("Public/{}", names::base58(&[2; 32])), "account_kind": "public" },
+        { "account": format!("Public/{}", names::base58(&[3; 32])), "account_kind": "public", "balance": "0" },
+        { "account": format!("Public/{}", names::base58(&[4; 32])), "account_kind": "public", "balance": "1500000000" },
+    ]);
+    assert_eq!(parse(module.set_accounts(&input.to_string()))["ok"], true);
+    let got = parse(module.accounts());
+    assert_eq!(got["ok"], true, "{got}");
+    let rows = got["accounts"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["balance"], Value::Null);
+    assert_eq!(rows[0]["balance_display"], "Reading…");
+    assert_eq!(rows[1]["balance"], Value::Null);
+    assert_eq!(rows[1]["balance_display"], "Reading…");
+    assert_eq!(rows[2]["balance"], "0");
+    assert_eq!(rows[2]["balance_display"], "0 LEZ");
+    assert_eq!(rows[3]["balance"], "1500000000");
+    assert_eq!(rows[3]["balance_display"], "1.5 LEZ");
+}

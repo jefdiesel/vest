@@ -645,13 +645,50 @@ export function payeeAccount(payee, typed) {
     return p.ok && p.via === "names" && p.account && p.typed === String(typed == null ? "" : typed).trim() ? "Public/" + p.account : ""
 }
 
+/// Delays (ms) before each retry of reading balances: 3 s, 6 s, 12 s (at most 4 tries).
+export const BALANCE_RETRY_MS = [3000, 6000, 12000]
+
+/// Wait in ms before the next balance try after `tries` tries have failed, or 0 to stop.
+export function balanceRetryDelay(tries) {
+    var i = Number(tries) - 1
+    return i >= 0 && i < BALANCE_RETRY_MS.length ? BALANCE_RETRY_MS[i] : 0
+}
+
 /// Names `granted_accounts` + `account_balances` as the vesting module's `set_accounts` input.
+/// A balance Names didn't give stays null (unknown), never "0"; a real "0" stays "0".
 export function namesAccounts(granted, balances) {
     var b = {}
-    ;(balances || []).forEach(function(x) { b[x.account] = x.balance })
-    return ((granted && granted.accounts) || []).map(function(a) {
-        return { account: a.account, account_kind: a.account_kind, balance: b[a.account] || "0" }
+    ;(balances || []).forEach(function(x) {
+        if (x && x.account && x.balance !== null && x.balance !== undefined && String(x.balance).trim() !== "")
+            b[x.account] = String(x.balance).trim()
     })
+    return ((granted && granted.accounts) || []).map(function(a) {
+        return {
+            account: a.account,
+            account_kind: a.account_kind,
+            balance: Object.prototype.hasOwnProperty.call(b, a.account) ? b[a.account] : null
+        }
+    })
+}
+
+/// Whether every public account in `rows` (from `namesAccounts`) has a balance.
+export function balancesKnown(rows) {
+    var list = rows || []
+    for (var i = 0; i < list.length; i++) {
+        var a = list[i]
+        if (!a || a.account_kind === "private" || String(a.account || "").indexOf("Private/") === 0) continue
+        if (a.balance === null || a.balance === undefined || String(a.balance).trim() === "") return false
+    }
+    return true
+}
+
+/// How an account's balance reads on screen: the formatted amount when known (including "0 LEZ"
+/// for a real zero), "Balance not read · Refresh" after all retries fail, or "Reading…".
+export function balanceText(account, failed) {
+    var a = account || {}
+    var known = a.balance !== null && a.balance !== undefined && String(a.balance).trim() !== ""
+    if (known) return a.balance_display || lezText(a.balance)
+    return failed ? "Balance not read · Refresh" : "Reading…"
 }
 
 // ── Guides ──────────────────────────────────────────────────────────────────────────

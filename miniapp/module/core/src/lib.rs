@@ -482,7 +482,7 @@ impl Module {
                     id: names::parse_address(&account.id)
                         .ok_or_else(|| format!("accounts: '{}' is not an account", account.id))?,
                     private: account.private,
-                    balance: account.balance.parse().unwrap_or(0),
+                    balance: account.balance.trim().parse::<u128>().ok(),
                 });
             }
             Client::new(AppBackend::Wallet(
@@ -685,7 +685,8 @@ impl Module {
         }
     }
 
-    /// The wallet's accounts with their native balances.
+    /// The wallet's accounts with their native balances (`balance` is null and `balance_display`
+    /// is `"Reading…"` when the wallet hasn't read a balance yet).
     pub fn accounts(&mut self) -> String {
         answer(|| {
             let accounts = self.wallet_accounts()?;
@@ -696,8 +697,8 @@ impl Module {
                         "id": hex::encode(a.id),
                         "base58": b58(&a.id),
                         "private": a.private,
-                        "balance": a.balance.to_string(),
-                        "balance_display": display::amount(a.balance),
+                        "balance": a.balance.map(|b| b.to_string()),
+                        "balance_display": a.balance.map(display::amount).unwrap_or_else(|| "Reading…".to_string()),
                         "name": self.book.label(&a.id),
                     })
                 })
@@ -1031,8 +1032,9 @@ impl Module {
                 let balance = row
                     .get("balance")
                     .and_then(Value::as_str)
-                    .and_then(|b| b.parse().ok())
-                    .unwrap_or(0);
+                    .map(str::trim)
+                    .filter(|b| !b.is_empty())
+                    .and_then(|b| b.parse::<u128>().ok());
                 accounts.push(WalletAccount {
                     id,
                     private,

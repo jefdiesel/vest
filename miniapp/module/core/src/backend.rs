@@ -14,8 +14,8 @@ use vesting_sdk::{Backend, ScheduleId};
 pub struct WalletAccount {
     pub id: AccountId,
     pub private: bool,
-    /// Native LEZ balance (smallest unit).
-    pub balance: u128,
+    /// Native LEZ balance (smallest unit), or None when not read yet.
+    pub balance: Option<u128>,
 }
 
 /// What the module needs beyond the SDK's `Backend`.
@@ -42,7 +42,7 @@ impl ModuleBackend for vesting_sdk::LezBackend {
             .map(|(id, private, balance)| WalletAccount {
                 id,
                 private,
-                balance,
+                balance: Some(balance),
             })
             .collect())
     }
