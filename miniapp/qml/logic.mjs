@@ -89,10 +89,11 @@ export function partsOf(ms) {
         hour: d.getHours(), minute: d.getMinutes() }
 }
 
-/// The browser's short time-zone name, or "" when it cannot say.
-export function timeZoneName() {
+/// The short time-zone name at moment `date` (a Date; now when left out), or "" when it cannot
+/// say. A date across a daylight-saving change has another offset than today.
+export function timeZoneName(date) {
     // From the clock offset: Basecamp's engine ignores the timeZoneName option (it gave "PM").
-    var off = -new Date().getTimezoneOffset()
+    var off = -(date || new Date()).getTimezoneOffset()
     if (!isFinite(off)) return ""
     if (off === 0) return "UTC"
     var h = Math.floor(Math.abs(off) / 60), m = Math.abs(off) % 60
@@ -106,7 +107,7 @@ export function dateTimeText(ms) {
     var week = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     function two(n) { return (n < 10 ? "0" : "") + n }
-    var zone = timeZoneName()
+    var zone = timeZoneName(d)
     return week[d.getDay()] + " " + d.getDate() + " " + months[d.getMonth()] + " " + d.getFullYear()
         + " · " + two(d.getHours()) + ":" + two(d.getMinutes())
         + " (your time" + (zone ? ", " + zone : "") + ")"
@@ -409,6 +410,16 @@ export function problemAccount(text) {
     return ""
 }
 
+/// Why `text` can't hold a schedule role (who receives it, who may cancel, who says a
+/// milestone is reached), or "": an account problem, or a private account, which can't sign
+/// the claim or the change.
+export function problemRole(text) {
+    var problem = problemAccount(text)
+    if (problem !== "") return problem
+    if (/^Private\//.test(String(text).trim())) return "That is a private account. Use a public address (Public/…) or an LNS name: a private account can't claim or sign for a schedule."
+    return ""
+}
+
 /// The name the module's name book shows for an account ({hex: name}), or "".
 export function nameOf(account, names) {
     var map = names || {}
@@ -462,7 +473,7 @@ export function validateCreate(p) {
     p = p || {}
     var e = []
     if (KINDS.indexOf(p.kind) < 0) e.push("Choose a schedule kind.")
-    if (problemAccount(p.beneficiary) !== "") e.push("Who receives it: " + problemAccount(p.beneficiary))
+    if (problemRole(p.beneficiary) !== "") e.push("Who receives it: " + problemRole(p.beneficiary))
     if (tokenProblem(p.token)) e.push(tokenProblem(p.token))
     if (p.kind !== "milestone") {
         if (!/^\d+$/.test(String(p.amount == null ? "" : p.amount)) || num(p.amount) <= 0) e.push("Amount must be a positive whole number.")
@@ -477,8 +488,8 @@ export function validateCreate(p) {
                 break
             }
     }
-    if (p.cancelAuthority && problemAccount(p.cancelAuthority) !== "") e.push("Cancel authority: " + problemAccount(p.cancelAuthority))
-    if (p.milestoneAuthority && problemAccount(p.milestoneAuthority) !== "") e.push("Milestone authority: " + problemAccount(p.milestoneAuthority))
+    if (p.cancelAuthority && problemRole(p.cancelAuthority) !== "") e.push("Cancel authority: " + problemRole(p.cancelAuthority))
+    if (p.milestoneAuthority && problemRole(p.milestoneAuthority) !== "") e.push("Milestone authority: " + problemRole(p.milestoneAuthority))
     return { ok: e.length === 0, errors: e }
 }
 
@@ -510,7 +521,14 @@ export const DECIMALS = 9
 /// `decimals` decimals. Exact: works on the digits, never on floats.
 export function toBase(text, decimals) {
     var d = decimals === undefined ? DECIMALS : decimals
-    var s = String(text == null ? "" : text).trim().replace(/,/g, "")
+    var raw = String(text == null ? "" : text).trim()
+    // Commas only as thousands separators of the whole part ("1,000.5"): a decimal comma
+    // ("1,5") or a stray one is refused, never read as a 10x larger amount.
+    var point = raw.indexOf(".")
+    var whole = point < 0 ? raw : raw.slice(0, point)
+    if (whole.indexOf(",") >= 0 && !/^\d{1,3}(,\d{3})+$/.test(whole)) return ""
+    if (point >= 0 && raw.slice(point).indexOf(",") >= 0) return ""
+    var s = raw.replace(/,/g, "")
     var m = /^(\d*)(?:\.(\d*))?$/.exec(s)
     if (!m || (m[1] === "" && (m[2] || "") === "")) return ""
     var frac = m[2] || ""
@@ -643,6 +661,33 @@ export function payeeFromNames(typed, r) {
 export function payeeAccount(payee, typed) {
     var p = payee || {}
     return p.ok && p.via === "names" && p.account && p.typed === String(typed == null ? "" : typed).trim() ? "Public/" + p.account : ""
+}
+
+/// Two lookups race for the payout box (Names Wallet's and Vest's own). Given answer `v`
+/// (payeeLine's or payeeFromNames' shape), whether the other lookup is still `waiting`, and the
+/// other's earlier failed answer (or null): the answer to show now, or null to wait for the
+/// other. A found account always wins; a failure waits while the other may still find it; of
+/// two failures a definite one beats "couldn't check just now".
+export function payeePick(v, waiting, earlier) {
+    var x = v || {}
+    if (x.ok) return x
+    if (waiting) return null
+    if (earlier && !earlier.ok && x.retry && !earlier.retry) return earlier
+    return x
+}
+
+/// The address a create receipt shows for who receives it: what the payout box found at
+/// submit (`payee`), else the module's own lookup of the typed name (`resolved`, create_call's
+/// `[{name, base58}]`), else the address sent (`beneficiary`, maybe "Public/<id>").
+export function receiptTo(payee, beneficiary, typed, resolved) {
+    var p = payee || {}
+    if (p.ok && p.account) return p.account
+    if (p.ok && p.base58) return p.base58
+    var t = String(typed == null ? "" : typed).trim().toLowerCase()
+    var list = resolved || []
+    for (var i = 0; i < list.length; i++)
+        if (list[i] && list[i].base58 && String(list[i].name || "").toLowerCase() === t) return list[i].base58
+    return base58Of(String(beneficiary == null ? "" : beneficiary).replace(/^Public\//, ""))
 }
 
 /// Delays (ms) before each retry of reading balances: 3 s, 6 s, 12 s (at most 4 tries).

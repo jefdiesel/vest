@@ -282,6 +282,9 @@ fn execute_with(cli: &Cli, ctx: &mut NamesCtx) -> Result<Vec<String>, String> {
             }
             // On LEZ the time comes from the chain's clock; --now applies to the JSON backend.
             let now = backend.now();
+            if now == 0 {
+                return Err("could not read the chain's clock: try again".into());
+            }
             run(&mut backend, cli, now, ctx)
         }
         #[cfg(not(feature = "lez"))]

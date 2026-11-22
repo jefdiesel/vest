@@ -190,7 +190,8 @@ Item {
         call("accounts", [], function(a) {
             if (!a.ok) return
             accounts = a.accounts || []
-            if (cCreator === "" && publicAccounts.length) cCreator = publicAccounts[0].id
+            // "Paid from" must be an account Names Wallet gives now (not one of an earlier connection).
+            if (!findById(publicAccounts, cCreator)) cCreator = publicAccounts.length ? publicAccounts[0].id : ""
         })
     }
 
@@ -330,6 +331,7 @@ Item {
         resetScan()
         accountsSent = false
         accounts = []
+        cCreator = ""
         schedules = []
         call("set_accounts", ["[]"], function() {})
     }
@@ -525,6 +527,7 @@ Item {
     function doTransfer(id, target) {
         var typed = Logic.accountInput(target)
         if (!typed.ok) { say("Enter the address or LNS name of the person receiving.", true); return }
+        if (Logic.problemRole(typed.account) !== "") { say(Logic.problemRole(typed.account), true); return }
         namesWrite("transfer", "transfer_call", [String(id), typed.account], function() {
             transferField.text = ""
             say("Schedule " + id + " now goes to " + typed.account + ".", false, Logic.nextLine("transfer"))
@@ -585,19 +588,22 @@ Item {
         if (t === "") { payee = null; return }
         payee = { ok: false, checking: true, text: "Checking " + t + "…" }
         // Ask Names Wallet and Vest's own lookup (it reads the chain directly) at once; the first
-        // answer wins, so a busy Names Wallet (catching up with the chain) never leaves this spinning.
+        // account found wins, so a busy Names Wallet (catching up with the chain) never leaves this
+        // spinning, and a failure of one waits for the other (Logic.payeePick).
         var answered = false
+        var askNames = namesState === "connected" && Logic.accountKind(t) === "name"
+        var out = askNames ? 2 : 1
+        var earlier = null
         var settle = function(v) {
+            out -= 1
             if (answered || beneficiaryField.text.trim() !== t) return
-            if (v.checking) return
+            var pick = Logic.payeePick(v, out > 0, earlier)
+            if (pick === null) { earlier = v; return }
             answered = true
-            payee = v
+            payee = pick
         }
-        if (namesState === "connected" && Logic.accountKind(t) === "name")
-            wallet.resolve(t, function(r) {
-                var v = Logic.payeeFromNames(t, r)
-                if (!v.retry) settle(v)
-            })
+        if (askNames)
+            wallet.resolve(t, function(r) { settle(Logic.payeeFromNames(t, r)) })
         call("resolve_name", [t], function(r) { settle(Logic.payeeLine(t, r)) }, 30000)
     }
 
@@ -621,19 +627,22 @@ Item {
         if (notEnough !== "") { say(notEnough, true); return }
         var looked = found !== "" ? root.payee.resolved : []
         var typed = beneficiaryField.text.trim()
-        namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, cCreator))], function(built, v) {
+        // What was sent, kept for the receipt: the form may change while Names Wallet asks.
+        var creatorId = cCreator
+        var sentPayee = root.payee
+        namesWrite("create", "create_call", [JSON.stringify(Logic.toCreateRow(p, creatorId))], function(built, v) {
             justCreated = true
             call("import_schedule", [built.schedule_address], function(imp) {
                 var id = imp.ok ? imp.id : ""
-                var payerAcct = findById(publicAccounts, cCreator)
+                var payerAcct = payer
                     var shown = function(nm) {
-                        var toAddr = root.payee && root.payee.account ? root.payee.account : (root.payee && root.payee.base58 ? root.payee.base58 : Logic.base58Of(String(p.beneficiary).replace(/^Public\//, "")))
+                        var toAddr = Logic.receiptTo(sentPayee, p.beneficiary, typed, built.resolved)
                         root.shownAddr = ({})
                         root.receipt = {
                             id: id, amountDisplay: built.amount_display, kind: p.kind, start: p.start, cliff: p.cliff, end: p.end,
                             cancelable: p.cancelable, transferable: p.transferable,
                             fromAddr: payerAcct ? payerAcct.base58 : "", fromName: nm,
-                            toAddr: toAddr, toName: Logic.accountKind(typed) === "name" ? typed : (root.payee && root.payee.name ? root.payee.name : ""),
+                            toAddr: toAddr, toName: Logic.accountKind(typed) === "name" ? typed : (sentPayee && sentPayee.name ? sentPayee.name : ""),
                             tx: v.tx || "", code: built.schedule_address || ""
                         }
                         say(Logic.resolvedLines(looked.concat(built.resolved || [])).concat(["Created " + (id !== "" ? "schedule " + id : "the schedule") + " · " + built.amount_display + (v.tx ? " · transaction " + Logic.short(v.tx) : "") + "."]).join(" "),
@@ -1246,7 +1255,7 @@ Item {
                             }
                             Action {
                                 look: root.look; grave: true; changes: true; busy: root.busy
-                                visible: managed.modelData.cancelable && managed.modelData.mine.cancel_authority
+                                visible: managed.modelData.cancelable && (managed.modelData.mine.cancel_authority || managed.modelData.mine.creator)
                                 label: "Make it permanent"; busyLabel: "Updating…"; working: root.workingOn === "irrevocable:" + managed.modelData.id
                                 onPressed: root.askGrave("irrevocable", managed.modelData)
                             }

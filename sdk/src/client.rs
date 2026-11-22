@@ -78,20 +78,20 @@ pub fn pre_claim_summary<B: Backend>(
     let to_private = destination.kind == AccountKind::Private;
     let mut fee = None;
     if claimable_now > 0 {
-        if to_private {
-            backend.set_claim_target(destination.id);
-        }
         // The claim the client would send, as `Client::claim` builds it. A claim the rules refuse
         // (a caller who is not the beneficiary) is the same error the claim itself would give.
         let (next, _amount, event) = claim(&state, caller, now, to_private)?;
+        // Only once the claim is valid: a target left behind by a refused claim would steer the
+        // backend's next claim.
+        if to_private {
+            backend.set_claim_target(destination.id);
+        }
         backend.set_caller(caller);
         fee = backend
             .estimate_fee(id, &next, &event)
             .map_err(|error| SdkError::Backend(error.to_string()))?;
     }
-    let fee_covered = fee
-        .as_ref()
-        .and_then(|estimate| estimate.available.map(|have| have >= estimate.fee));
+    let fee_covered = fee.as_ref().and_then(FeeEstimate::covered);
     Ok(PreClaimSummary {
         schedule: id,
         claimable: claimable_now,
@@ -202,9 +202,24 @@ impl<B: Backend> Client<B> {
         caller: AccountId,
         to_private: bool,
     ) -> Result<(Schedule, Amount, Event), SdkError> {
+        self.claim_to(id, caller, to_private, None)
+    }
+
+    /// `claim`, telling the backend the private `target` only once the claim is valid (a target
+    /// left behind by a refused claim must never steer a later one).
+    fn claim_to(
+        &mut self,
+        id: ScheduleId,
+        caller: AccountId,
+        to_private: bool,
+        target: Option<AccountId>,
+    ) -> Result<(Schedule, Amount, Event), SdkError> {
         let state = self.schedule(id)?;
         let (next, _local, event) = claim(&state, caller, self.now(), to_private)?;
         self.backend.set_caller(caller);
+        if let Some(target) = target {
+            self.backend.set_claim_target(target);
+        }
         self.record(id, &next, event.clone())?;
         // What the ledger did, which on LEZ is what the chain paid.
         let after = self.schedule(id)?;
@@ -234,8 +249,7 @@ impl<B: Backend> Client<B> {
         }
         // The LEZ backend sends to a one-time alias of this account (and checks with the wallet
         // that it is private); other backends ignore the target.
-        self.backend.set_claim_target(target.id);
-        self.claim(id, caller, true)
+        self.claim_to(id, caller, true, Some(target.id))
     }
 
     pub fn cancel(

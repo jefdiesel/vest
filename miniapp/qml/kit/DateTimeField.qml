@@ -95,6 +95,9 @@ Item {
         minuteInput.text = pad2(panel.minute)
     }
     function done() {
+        // Hours and minutes typed without pressing Return count too.
+        setHour(hourInput.text)
+        setMinute(minuteInput.text)
         field.ms = Logic.atLocal(panel.year, panel.month, panel.day, panel.hour, panel.minute)
         field.changed()
         close()

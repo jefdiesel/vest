@@ -51,3 +51,13 @@ pub fn amount(value: u128) -> String {
     out.push_str(SYMBOL);
     out
 }
+
+/// An amount of a schedule's token: native LEZ (the zero token) as `amount`; another token's
+/// base units grouped, as "1,000,000 units" (its decimals and symbol aren't known here).
+pub fn amount_of(value: u128, token: &[u8; 32]) -> String {
+    if *token == [0u8; 32] {
+        amount(value)
+    } else {
+        format!("{} units", group(&value.to_string()))
+    }
+}

@@ -28,21 +28,28 @@ function answer(ok, extra) {
 function fail(code, message) { return answer(false, { code: code, error: text(message) }) }
 function done(fn, value) { if (fn) fn(value) }
 
-/// The module's JSON, once or twice encoded, as {ok, value} or {ok:false, code, error}.
+var MISSING = /not connected|not reachable|not loaded|not installed|module not found|no such module/i
+
+/// The module's JSON, once or twice encoded, as {ok, value} or {ok:false, code, error}. The
+/// vesting module answers `{"ok": true, ...}` (the value is that whole object) or
+/// `{"ok": false, "error": ...}`; Basecamp's own refusal is `{"error", "message"}` or plain text.
 export function reply(raw) {
     var parsed = raw
     for (var depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
         try { parsed = JSON.parse(parsed) } catch (error) { break }
     }
-    if (!isObject(parsed) || typeof parsed.success !== "boolean")
-        return fail("no_answer", "No answer from the Vesting module. It may still be busy; try again.")
-    if (!parsed.success) {
+    if (isObject(parsed) && typeof parsed.ok === "boolean") {
+        if (parsed.ok) return answer(true, { value: parsed })
         var why = text(parsed.error || "the Vesting module refused the request")
-        var code = /not connected|not reachable|not loaded|not installed|module not found|no such module/i.test(why)
-            ? "module_missing" : "module_error"
-        return fail(code, why)
+        return fail(MISSING.test(why) ? "module_missing" : "module_error", why)
     }
-    return answer(true, { value: parsed.value })
+    if (isObject(parsed) && parsed.error) {
+        var said = text(parsed.message || parsed.error)
+        return fail(MISSING.test(said + " " + text(parsed.error)) ? "module_missing" : "module_error", said)
+    }
+    if (typeof parsed === "string" && MISSING.test(parsed))
+        return fail("module_missing", parsed)
+    return fail("no_answer", "No answer from the Vesting module. It may still be busy; try again.")
 }
 
 /// A private destination cannot be signed by Names Wallet yet.
@@ -159,7 +166,13 @@ export function createVest(host, wallet) {
     sdk.unlockMilestone = function(id, index, callback) {
         write("signal_call", [text(id), text(index)], callback)
     }
+    /// A private account can't be a schedule's beneficiary: it could never sign the claim.
     sdk.transfer = function(id, to, callback) {
+        if (isPrivate(to)) {
+            done(callback, fail("private_beneficiary",
+                "A private account can't receive a schedule. Transfer it to a public account."))
+            return
+        }
         write("transfer_call", [text(id), text(isObject(to) ? to.account : to)], callback)
     }
 

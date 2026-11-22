@@ -270,11 +270,35 @@ mod backend_impl {
         }
 
         /// Record an existing schedule account under a local id (a beneficiary on another machine).
+        /// An account already imported keeps its id; one that holds no schedule of this program
+        /// is refused before it gets one.
         pub fn import(&mut self, account: [u8; 32]) -> Result<ScheduleId, BackendError> {
+            if let Some(id) = self.id_of(&account) {
+                return Ok(id);
+            }
+            let wallet = self.wallet()?;
+            let found = self.chain_state(&wallet, AccountId::new(account))?;
+            drop(wallet);
+            if !found.is_some_and(|chain| chain.schedule.is_some()) {
+                return Err(BackendError::Io(format!(
+                    "{} is not a schedule of this vesting program",
+                    hex::encode(account)
+                )));
+            }
             let id = self.next_id();
             self.map.ids.insert(id, hex::encode(account));
             self.persist()?;
             Ok(id)
+        }
+
+        /// The local id of an imported (or created) schedule account, when it has one.
+        pub fn id_of(&self, account: &[u8; 32]) -> Option<ScheduleId> {
+            let hex = hex::encode(account);
+            self.map
+                .ids
+                .iter()
+                .find(|(_, known)| **known == hex)
+                .map(|(id, _)| *id)
         }
 
         fn wallet(&self) -> Result<WalletCore<SequencerClient>, BackendError> {
@@ -624,9 +648,14 @@ mod backend_impl {
             let mut programs = vec![self.program];
             for asset in &seen_escrows {
                 if let Asset::Token { program, .. } = asset {
-                    programs.push(*program);
+                    if !programs.contains(program) {
+                        programs.push(*program);
+                    }
                 }
             }
+            // A native and a sponsored token schedule both mention the creator's native LEZ (two
+            // definitions of one token program its holding): the wallet refuses a repeated actor.
+            dedup_mentions(&mut accounts);
             let message = borsh::to_vec(&Instruction::Create { schedules }).expect("borsh");
             drop(wallet);
             self.runtime_send(accounts, message, programs, None)?;
@@ -754,11 +783,18 @@ mod backend_impl {
             let mut fee_payer = None;
             let instruction = match event {
                 Event::Claimed { to_private, at, .. } => {
-                    let target = self
-                        .claim_target
-                        .take()
-                        .unwrap_or(AccountId::new(state.beneficiary));
-                    let private = wallet.resolve_private_account(target);
+                    // The queued target is used up by this claim either way, and only a private
+                    // claim goes anywhere but the beneficiary's own account.
+                    let queued = self.claim_target.take();
+                    let target = match (*to_private, queued) {
+                        (true, Some(target)) => target,
+                        _ => AccountId::new(state.beneficiary),
+                    };
+                    let private = if *to_private {
+                        wallet.resolve_private_account(target)
+                    } else {
+                        None
+                    };
                     if *to_private && private.is_none() {
                         return Err(BackendError::Io(
                             "the claim target is not a private account of this wallet".into(),

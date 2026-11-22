@@ -739,3 +739,99 @@ fn set_accounts_keeps_unknown_balance_distinct_from_zero() {
     assert_eq!(rows[3]["balance"], "1500000000");
     assert_eq!(rows[3]["balance_display"], "1.5 LEZ");
 }
+
+// ── Deep-review fixes (module 0.5.3; see .ref/VERIFIED.md) ───────────────────────────
+
+#[test]
+fn a_private_account_never_holds_a_schedule_role() {
+    let _serial = lock();
+    let mut module = fresh(500, 9);
+    let private = format!("Private/{}", names::base58(&[2; 32]));
+    for field in ["beneficiary", "cancel_authority", "milestone_authority"] {
+        let mut row: Value = serde_json::from_str(&create_row("1000", linear(0, 1000))).unwrap();
+        row[field] = json!(private);
+        let refused = parse(module.create(&row.to_string()));
+        assert_eq!(refused["ok"], false, "{field}: {refused}");
+        assert!(
+            refused["error"]
+                .as_str()
+                .unwrap()
+                .contains("private account"),
+            "{refused}"
+        );
+    }
+    // A Public/ address of the same account is fine.
+    let mut row: Value = serde_json::from_str(&create_row("1000", linear(0, 1000))).unwrap();
+    row["beneficiary"] = json!(format!("Public/{}", names::base58(&[2; 32])));
+    assert_eq!(parse(module.create(&row.to_string()))["ok"], true);
+    // Through Names Wallet: an account it gave Vest as private is refused even without the prefix.
+    let rpc = Arc::new(MockRpc::new());
+    let mut wallet = names_module(rpc);
+    parse(wallet.set_accounts(&json!([
+        { "account": format!("Public/{}", names::base58(&[1; 32])), "account_kind": "public" },
+        { "account": format!("Private/{}", names::base58(&[6; 32])), "account_kind": "private" },
+    ]).to_string()));
+    let mut row: Value = serde_json::from_str(&create_row("1000", linear(0, 1000))).unwrap();
+    row["beneficiary"] = json!(names::base58(&[6; 32]));
+    let refused = parse(wallet.create_call(&row.to_string()));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("private account"),
+        "{refused}"
+    );
+    let refused = parse(wallet.transfer_call(0, &format!("Private/{}", names::base58(&[6; 32]))));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("private account"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_failed_clock_read_is_an_error_not_1970() {
+    let _serial = lock();
+    let rpc = Arc::new(MockRpc::new());
+    let mut module = names_module(rpc.clone());
+    // Nothing queued: the clock read fails, which the backend reads as time 0.
+    let listed = parse(module.list());
+    assert_eq!(listed["ok"], false, "{listed}");
+    assert!(
+        listed["error"].as_str().unwrap().contains("clock"),
+        "{listed}"
+    );
+    rpc.push_ok("getAccountView", clock_answer(400));
+    let listed = parse(module.list());
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["time"], 400);
+}
+
+#[test]
+fn the_creator_makes_a_schedule_permanent_when_the_cancel_authority_is_someone_else() {
+    let _serial = lock();
+    let mut module = fresh(500, 9);
+    let mut row: Value = serde_json::from_str(&create_row("1000", linear(0, 1000))).unwrap();
+    row["cancel_authority"] = json!(hex_id(9)); // not an account of this wallet
+    assert_eq!(parse(module.create(&row.to_string()))["ok"], true);
+    let done = parse(module.make_irrevocable(0));
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(parse(module.list())["schedules"][0]["cancelable"], false);
+}
+
+#[test]
+fn a_token_schedule_is_not_shown_as_lez() {
+    let _serial = lock();
+    let mut module = fresh(500, 9);
+    let mut row: Value = serde_json::from_str(&create_row("1000000", linear(0, 1000))).unwrap();
+    row["token"] = json!(hex_id(7));
+    assert_eq!(parse(module.create(&row.to_string()))["ok"], true);
+    module.create(&create_row("1000000000", linear(0, 1000)));
+    let listed = parse(module.list());
+    let token = &listed["schedules"][0];
+    assert_eq!(token["total_display"], "1,000,000 units");
+    assert_eq!(token["claimable_display"], "500,000 units");
+    assert_eq!(listed["schedules"][1]["total_display"], "1 LEZ");
+}

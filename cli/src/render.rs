@@ -48,13 +48,14 @@ pub fn fee_lines(summary: &vesting_sdk::PreClaimSummary) -> Vec<String> {
         estimate.fee, payer, estimate.reserve
     )];
     if let Some(have) = estimate.available {
-        lines.push(if have >= estimate.fee {
+        let need = estimate.needed();
+        lines.push(if have >= need {
             format!("fee check: ok (the payer will have {})", have)
         } else {
             format!(
                 "fee check: NOT ENOUGH: the payer will have {}, {} short",
                 have,
-                estimate.fee - have
+                need - have
             )
         });
     }
@@ -173,4 +174,43 @@ pub fn privacy_disclosure(amount: Amount, beneficiary: &str, id: u64, destinatio
          Not traceable: the destination private account ({}) and any subsequent movements of the claimed tokens.",
         amount, id, amount, beneficiary, destination
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vesting_sdk::{AccountKind, FeeEstimate, FeePayer, PreClaimSummary};
+
+    fn summary(fee: Amount, reserve: Amount, have: Amount, payer: FeePayer) -> PreClaimSummary {
+        PreClaimSummary {
+            schedule: 0,
+            claimable: 5,
+            estimated_fee: fee,
+            fee: Some(FeeEstimate {
+                fee,
+                reserve,
+                payer,
+                available: Some(have),
+                revert_reason: None,
+            }),
+            fee_covered: None,
+            next_unlock: None,
+            destination_kind: AccountKind::Public,
+        }
+    }
+
+    #[test]
+    fn the_fee_check_asks_a_public_payer_for_the_reserve() {
+        // Between the fee and the reserve: the sequencer would refuse it.
+        let lines = fee_lines(&summary(341_088, 425_032, 350_000, FeePayer::Caller));
+        assert_eq!(
+            lines[1],
+            "fee check: NOT ENOUGH: the payer will have 350000, 75032 short"
+        );
+        let lines = fee_lines(&summary(341_088, 425_032, 425_032, FeePayer::Caller));
+        assert!(lines[1].starts_with("fee check: ok"), "{lines:?}");
+        // A private payer's reserve is clamped to its balance: the fee decides.
+        let lines = fee_lines(&summary(341_088, 425_032, 350_000, FeePayer::ClaimTarget));
+        assert!(lines[1].starts_with("fee check: ok"), "{lines:?}");
+    }
 }

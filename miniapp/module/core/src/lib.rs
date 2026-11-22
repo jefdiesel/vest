@@ -110,6 +110,9 @@ impl ModuleBackend for AppBackend {
     }
 }
 
+/// Why a private account can't be a beneficiary or an authority.
+const PRIVATE_ROLE: &str = "a private account can't receive or manage a schedule (it could never sign the claim or the change); use a public address";
+
 /// The signer when the settings name none: Names Wallet in the app; the JSON ledger in tests.
 #[cfg(feature = "lez")]
 const DEFAULT_SIGNER: &str = "names";
@@ -513,6 +516,16 @@ impl Module {
         let _ = self.book.save(&self.dir.join("vesting-names.json"));
     }
 
+    /// Whether `text` names a private account: written `Private/<id>`, or one Names Wallet gave
+    /// Vest as private. (A schedule role must be public: a private account can't sign for it.)
+    fn is_private_text(&self, text: &str) -> bool {
+        if text.starts_with("Private/") {
+            return true;
+        }
+        names::parse_address(text)
+            .is_some_and(|id| self.names_accounts.iter().any(|a| a.private && a.id == id))
+    }
+
     /// Resolve an account typed by a person: hex, base58 or an LNS name.
     fn resolve(&mut self, text: &str) -> Result<(AccountId, Option<String>), String> {
         if let Some(account) = names::parse_address(text) {
@@ -565,6 +578,8 @@ impl Module {
             } else if text.is_empty() && field.ends_with("authority") {
                 row[field] = Value::Null;
                 continue;
+            } else if field != "token" && self.is_private_text(text) {
+                return Err(format!("{field}: {PRIVATE_ROLE}"));
             } else {
                 let (account, name) = self.resolve(text).map_err(|e| format!("{field}: {e}"))?;
                 if let Some(name) = name {
@@ -714,8 +729,13 @@ impl Module {
     pub fn list(&mut self) -> String {
         answer(|| {
             let mine: Vec<AccountId> = self.wallet_accounts()?.iter().map(|a| a.id).collect();
+            let on_chain = self.names_mode() || cfg!(feature = "lez");
             let client = self.client()?;
             let now = client.now();
+            // A failed clock read is 0: say so, never show every schedule as of 1970.
+            if now == 0 && on_chain {
+                return Err("could not read the chain's clock".into());
+            }
             let schedules: Vec<(u64, Schedule, Option<AccountId>)> = client
                 .list()
                 .into_iter()
@@ -964,7 +984,15 @@ impl Module {
             return fail(NAMES_NOT_YET);
         }
         answer(|| {
-            let caller = self.schedule(id)?.cancel_authority;
+            // The cancel authority, or the creator when the wallet holds only that (both may).
+            let schedule = self.schedule(id)?;
+            let mine = self.wallet_accounts()?;
+            let holds = |c: AccountId| mine.iter().any(|a| !a.private && a.id == c);
+            let caller = if !holds(schedule.cancel_authority) && holds(schedule.creator) {
+                schedule.creator
+            } else {
+                schedule.cancel_authority
+            };
             match self.client()?.make_irrevocable(id, caller) {
                 Ok(_) => Ok(ok(json!({ "tx": self.tx() }))),
                 Err(error) => Ok(sdk_fail(error)),
@@ -1218,6 +1246,9 @@ impl Module {
     /// `propose_call` arguments that move schedule `id` to another beneficiary (hex, base58 or a
     /// name; its beneficiary signs, and the schedule must be transferable).
     pub fn transfer_call(&mut self, id: u64, new_beneficiary: &str) -> String {
+        if self.is_private_text(new_beneficiary.trim()) {
+            return fail(format!("new beneficiary: {PRIVATE_ROLE}"));
+        }
         let (to, name) = match self.resolve(new_beneficiary.trim()) {
             Ok(found) => found,
             Err(error) => return fail(error),
@@ -1584,7 +1615,8 @@ impl Module {
             };
             let mut schedules = Vec::new();
             for (address, known) in &state.schedules {
-                let (Some(account), Some(schedule)) = (discover::parse_b58(address), known.decoded())
+                let (Some(account), Some(schedule)) =
+                    (discover::parse_b58(address), known.decoded())
                 else {
                     continue;
                 };
@@ -1611,7 +1643,6 @@ fn involves(s: &Schedule, mine: &[AccountId]) -> bool {
         || mine.contains(&s.cancel_authority)
         || mine.contains(&s.milestone_authority)
 }
-
 
 #[cfg(all(test, not(feature = "lez")))]
 mod tests;

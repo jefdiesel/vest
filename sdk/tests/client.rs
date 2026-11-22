@@ -288,3 +288,62 @@ fn a_private_summary_simulates_the_private_claim_and_checks_the_payer() {
         .unwrap_err();
     assert_eq!(error.code(), 10);
 }
+
+#[test]
+fn a_refused_claim_leaves_no_private_target_behind() {
+    // Before the cliff nothing is claimable: the private claim is refused, and the backend must
+    // not keep its target for the next (public) claim.
+    let mut client = Client::new(MemoryBackend::new(100));
+    let params = CreateParams {
+        kind: ScheduleKind::CliffLinear {
+            start: 0,
+            cliff: 500,
+            end: 1_000,
+        },
+        ..linear_params(1_000, 0, 1_000)
+    };
+    let (id, _, _) = client.create(params).unwrap();
+    assert_eq!(
+        client
+            .claim_private(id, B, AccountRef::private(C))
+            .unwrap_err()
+            .code(),
+        9
+    );
+    assert_eq!(client.backend().target, None);
+    // A caller who may not claim: the summary refuses before naming a target.
+    let mut backend = MemoryBackend::new(500);
+    backend.fee = Some(chain_fee(1, Some(10), FeePayer::ClaimTarget));
+    let mut client = Client::new(backend);
+    let (id, _, _) = client.create(linear_params(1_000, 0, 1_000)).unwrap();
+    assert_eq!(
+        client
+            .pre_claim_summary(id, C, AccountRef::private(C))
+            .unwrap_err()
+            .code(),
+        10
+    );
+    assert_eq!(client.backend().target, None);
+    // A valid private claim still names its target.
+    client.claim_private(id, B, AccountRef::private(C)).unwrap();
+    assert_eq!(client.backend().target, Some(C));
+}
+
+#[test]
+fn a_public_payer_needs_the_reserve_a_private_one_the_fee() {
+    // Public: admission holds the reserve (2 000 here), so 1 500 is not enough for a 1 000 fee.
+    let mut backend = MemoryBackend::new(500);
+    backend.fee = Some(chain_fee(1_000, Some(1_500), FeePayer::Caller));
+    let mut client = Client::new(backend);
+    let (id, _, _) = client.create(linear_params(1_000, 0, 1_000)).unwrap();
+    let summary = client
+        .pre_claim_summary(id, B, AccountRef::public(B))
+        .unwrap();
+    assert_eq!(summary.fee_covered, Some(false));
+    assert_eq!(summary.fee.as_ref().unwrap().needed(), 2_000);
+    // Private: LEZ clamps the reserve to the payer's balance; the fee is what must be there.
+    let estimate = chain_fee(1_000, Some(1_500), FeePayer::ClaimTarget);
+    assert_eq!(estimate.needed(), 1_000);
+    assert_eq!(estimate.covered(), Some(true));
+    assert_eq!(chain_fee(1_000, None, FeePayer::Caller).covered(), None);
+}

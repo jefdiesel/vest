@@ -52,19 +52,17 @@ impl ModuleBackend for vesting_sdk::LezBackend {
     }
 
     fn import_account(&mut self, account: AccountId) -> Result<ScheduleId, String> {
-        // Refuse an account that holds no schedule of this program before it gets an id.
-        let id = vesting_sdk::LezBackend::import(self, account).map_err(|e| e.to_string())?;
-        if let Err(error) = self.load(id) {
-            return Err(format!(
-                "{} is not a schedule of this vesting program: {error}",
-                hex::encode(account)
-            ));
-        }
-        Ok(id)
+        // The SDK keeps a known account's id and refuses one that holds no schedule of this
+        // program before it gets an id (nothing is saved for it).
+        vesting_sdk::LezBackend::import(self, account).map_err(|e| e.to_string())
     }
 
     fn schedule_address(&self, id: ScheduleId) -> Option<AccountId> {
         vesting_sdk::LezBackend::address(self, id).ok()
+    }
+
+    fn schedule_id(&self, account: &AccountId) -> Option<ScheduleId> {
+        vesting_sdk::LezBackend::id_of(self, account)
     }
 }
 

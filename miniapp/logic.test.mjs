@@ -554,3 +554,80 @@ check("atLocal and partsOf round-trip a local moment", L.partsOf(L.atLocal(2026,
     ], [true, true]);
   }
 }
+
+// ── Deep-review fixes (0.6.3; see .ref/VERIFIED.md) ──────────────────────────────────
+{
+  // #2: a private account can't hold a schedule role: it could never sign the claim or the change.
+  const P = "Private/" + ID, U = "Public/" + ID;
+  check("validateCreate: a private beneficiary or authority is refused", [
+    L.validateCreate(valid("linear", { beneficiary: P })).ok,
+    /private account/.test(L.validateCreate(valid("linear", { beneficiary: P })).errors[0]),
+    L.validateCreate(valid("linear", { cancelAuthority: P })).ok,
+    L.validateCreate(valid("milestone", { tranches: ["1"], milestoneAuthority: P })).ok,
+    L.validateCreate(valid("linear", { beneficiary: U, cancelAuthority: U })).ok
+  ], [false, true, false, false, true]);
+  check("problemRole: private refused, public/name/hex fine, bad text keeps its own words", [
+    L.problemRole(P) !== "", L.problemRole(U), L.problemRole("alice"), L.problemRole("ab".repeat(32)), L.problemRole("")
+  ], [true, "", "", "", "Enter an address or an LNS name."]);
+  const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+  check("Main.qml: a transfer to a private account is refused before Names Wallet is asked",
+    /function doTransfer[\s\S]{0,400}Logic\.problemRole\(typed\.account\)[\s\S]{0,200}namesWrite\("transfer"/.test(qml), true);
+
+  // #3: a decimal comma is refused, never read as ten times the amount.
+  check("toBase: commas only as thousands separators", [
+    L.toBase("1,5"), L.toBase("0,5"), L.toBase("1,00"), L.toBase("1,2345"), L.toBase(",5"), L.toBase("1.5,0"),
+    L.toBase("1,000"), L.toBase("12,345,678.25"), L.toBase("1,000.5")
+  ], ["", "", "", "", "", "", "1000000000000", "12345678250000000", "1000500000000"]);
+
+  // #10: the zone shown is the one at the date shown, not today's.
+  const summer = { getTimezoneOffset: () => 240 }, winter = { getTimezoneOffset: () => 300 };
+  check("timeZoneName: the offset of the date given", [L.timeZoneName(summer), L.timeZoneName(winter), L.timeZoneName({ getTimezoneOffset: () => 0 })], ["UTC−4", "UTC−5", "UTC"]);
+  const src = readFileSync(new URL("./qml/logic.mjs", import.meta.url), "utf8");
+  check("dateTimeText names the zone of its own date", /var zone = timeZoneName\(d\)/.test(src), true);
+  const inMay = L.dateTimeText(Date.UTC(2027, 4, 22, 13, 0)), offMay = -new Date(Date.UTC(2027, 4, 22, 13, 0)).getTimezoneOffset();
+  check("dateTimeText: the zone matches the moment's own offset", inMay.includes(L.timeZoneName(new Date(Date.UTC(2027, 4, 22, 13, 0)))) && (offMay === 0 ? /UTC\)$/.test(inMay) : true), true);
+
+  // #16: of the two payout-box lookups, a found account wins; a failure waits for the other.
+  const found = { ok: true, base58: ID, text: "Pays alice" };
+  const noOwner = { ok: false, text: "Can't pay alice by name yet" };
+  const busy = { ok: false, retry: true, text: "Couldn't check alice just now" };
+  check("payeePick: found wins at once, a failure waits while the other is out", [
+    L.payeePick(found, true, null), L.payeePick(noOwner, true, null), L.payeePick(busy, true, null)
+  ], [found, null, null]);
+  check("payeePick: the last answer decides; a definite failure beats a busy one", [
+    L.payeePick(found, false, noOwner), L.payeePick(busy, false, noOwner), L.payeePick(noOwner, false, busy), L.payeePick(busy, false, null)
+  ], [found, noOwner, noOwner, busy]);
+  check("Main.qml: checkPayee merges both lookups through payeePick (a busy module never hides Names' answer)", [
+    /Logic\.payeePick\(v, out > 0, earlier\)/.test(qml),
+    /if \(!v\.retry\) settle\(v\)/.test(qml)
+  ], [true, false]);
+
+  // #15: the receipt's "Receives" address is what was found, else the module's lookup of the name.
+  check("receiptTo: payee found, else the module's resolved name, else the address sent", [
+    L.receiptTo({ ok: true, via: "names", account: "AcctNames" }, "Public/AcctNames", "alice", []),
+    L.receiptTo(null, "alice", "alice", [{ name: "alice", base58: "AcctVest" }]),
+    L.receiptTo({ ok: false, checking: true }, "Alice", "Alice", [{ name: "alice", base58: "AcctVest" }]),
+    L.receiptTo(null, "Public/" + ID, "Public/" + ID, []),
+    L.receiptTo(null, "ab".repeat(32), "ab".repeat(32), [{ name: "bob", base58: "Other" }]) === L.base58Of("ab".repeat(32))
+  ], ["AcctNames", "AcctVest", "AcctVest", ID, true]);
+  check("Main.qml: the create receipt uses what was sent, not the form after approval", [
+    /var creatorId = cCreator/.test(qml), /var sentPayee = root\.payee/.test(qml),
+    /Logic\.receiptTo\(sentPayee, p\.beneficiary, typed, built\.resolved\)/.test(qml),
+    /var payerAcct = findById\(publicAccounts, cCreator\)/.test(qml)
+  ], [true, true, true, false]);
+
+  // #14: "Paid from" follows the accounts Names Wallet gives now.
+  check("Main.qml: a stale Paid-from account is replaced, and cleared on disconnect", [
+    /if \(!findById\(publicAccounts, cCreator\)\) cCreator = publicAccounts\.length \? publicAccounts\[0\]\.id : ""/.test(qml),
+    /function onDisconnected\(\)[\s\S]{0,300}cCreator = ""/.test(qml)
+  ], [true, true]);
+
+  // #13: the creator may make a schedule permanent too (core::make_irrevocable allows both).
+  check("Main.qml: Make it permanent shows for the cancel authority or the creator",
+    qml.includes("visible: managed.modelData.cancelable && (managed.modelData.mine.cancel_authority || managed.modelData.mine.creator)"), true);
+
+  // #6: Done keeps hours and minutes typed without Return.
+  const dtf = readFileSync(new URL("./qml/kit/DateTimeField.qml", import.meta.url), "utf8");
+  check("DateTimeField: Done commits the typed hour and minute first",
+    /function done\(\) \{[\s\S]{0,160}setHour\(hourInput\.text\)[\s\S]{0,40}setMinute\(minuteInput\.text\)[\s\S]{0,40}field\.ms = Logic\.atLocal/.test(dtf), true);
+}

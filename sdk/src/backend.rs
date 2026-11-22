@@ -56,6 +56,23 @@ pub struct FeeEstimate {
     pub revert_reason: Option<String>,
 }
 
+impl FeeEstimate {
+    /// What the payer must have for the transaction to be admitted: a public payer the reserve
+    /// (admission holds the fee at the gas limit, at least `fee`); a private claim's payer the
+    /// fee (LEZ clamps a private reserve to the payer's balance).
+    pub fn needed(&self) -> Amount {
+        match self.payer {
+            FeePayer::Caller => self.reserve.max(self.fee),
+            FeePayer::ClaimTarget => self.fee,
+        }
+    }
+
+    /// Whether the payer can pay, when the backend can tell.
+    pub fn covered(&self) -> Option<bool> {
+        self.available.map(|have| have >= self.needed())
+    }
+}
+
 /// Everything the SDK needs from a ledger. Kept deliberately small.
 pub trait Backend {
     /// Current time in milliseconds, or an override for testing.

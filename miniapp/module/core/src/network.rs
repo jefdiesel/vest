@@ -98,12 +98,28 @@ pub fn built_in() -> Network {
 }
 
 /// `http://127.0.0.1…` / `http://localhost…`: a local test chain, allowed without a chain id.
+/// The host itself must be loopback: `http://localhost.example.com` or `http://localhost@host`
+/// is not.
 pub fn is_loopback(rpc: &str) -> bool {
     let rest = rpc
         .strip_prefix("http://")
         .or_else(|| rpc.strip_prefix("https://"))
         .unwrap_or(rpc);
-    rest.starts_with("127.0.0.1") || rest.starts_with("localhost") || rest.starts_with("[::1]")
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if authority.starts_with('[') {
+        authority.split_inclusive(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    let port = &authority[host.len()..];
+    (port.is_empty() || port.starts_with(':'))
+        && matches!(
+            host.to_ascii_lowercase().as_str(),
+            "127.0.0.1" | "localhost" | "[::1]"
+        )
 }
 
 /// The chain id an RPC serves (`getChannelId`), lower-case hex.
@@ -125,6 +141,29 @@ pub fn channel_id(client: &vesting_sdk::names::RpcClient) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_is_the_host_itself() {
+        for local in [
+            "http://127.0.0.1:3040",
+            "http://localhost:3040/",
+            "localhost",
+            "https://[::1]:3040/rpc",
+            "http://LOCALHOST:1",
+        ] {
+            assert!(is_loopback(local), "{local}");
+        }
+        for remote in [
+            "https://localhost.evil.com/",
+            "https://127.0.0.1.evil.com/",
+            "http://localhost@evil.com/",
+            "http://evil.com/?localhost",
+            "http://[::1].evil.com/",
+            "https://rpc.example.org",
+        ] {
+            assert!(!is_loopback(remote), "{remote}");
+        }
+    }
 
     #[test]
     fn the_built_in_profile_names_this_deployment() {

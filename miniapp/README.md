@@ -97,7 +97,9 @@ wallet-folder setting) and fails on any QML error.
 The screen uses the shared kit in `qml/kit/` (Look, Action, PageHeader, Field, DateTimeField,
 FactRow, TechDetails, Tick, Link, RunsOn, BackButton), copied unchanged from the Program Registry browser
 (jefdiesel/lez-program-registry `guide-ui`, `registry_browser/qml/kit/`): one left-aligned column
-at most 680 px wide, 56 px from the window's edge, as in the Names Wallet.
+at most 680 px wide, 56 px from the window's edge, as in the Names Wallet. One local change since
+0.6.3: `DateTimeField`'s Done also takes hours and minutes typed without pressing Return (worth
+sending back to the registry's kit).
 
 ## Known limits
 

@@ -21,8 +21,9 @@ function hostFor(answers, options) {
             if (o.throws) throw new Error('host is gone');
             if (o.noBridge) return false;
             const value = Object.prototype.hasOwnProperty.call(answers, method) ? answers[method] : {};
-            if (value && value.__error) done(JSON.stringify({ success: false, error: value.__error }));
-            else done(JSON.stringify(JSON.stringify({ success: true, value: value })));
+            // The vesting module's own answers: {"ok": true, ...fields} or {"ok": false, "error"}.
+            if (value && value.__error) done(JSON.stringify({ ok: false, error: value.__error }));
+            else done(JSON.stringify(JSON.stringify(Object.assign({ ok: true }, value))));
             return true;
         }
     };
@@ -50,12 +51,27 @@ test('exports and the module name', () => {
     assert.equal(MODULE, 'vesting');
 });
 
-test('reply: encoded once or twice, a refusal and no answer', () => {
-    assert.deepEqual(reply('{"success":true,"value":3}'), { ok: true, value: 3 });
-    assert.deepEqual(reply(JSON.stringify('{"success":true,"value":4}')), { ok: true, value: 4 });
-    assert.equal(reply('{"success":false,"error":"bad id"}').code, 'module_error');
-    assert.equal(reply('module not connected: vesting').code, 'no_answer');
+test('reply: the vesting module\'s {ok, ...} answers, encoded once or twice, a refusal and no answer', () => {
+    assert.deepEqual(reply('{"ok":true,"time":3}'), { ok: true, value: { ok: true, time: 3 } });
+    assert.deepEqual(reply(JSON.stringify('{"ok":true,"schedules":[]}')), { ok: true, value: { ok: true, schedules: [] } });
+    assert.deepEqual(reply('{"ok":false,"error":"bad id"}'), { ok: false, code: 'module_error', error: 'bad id' });
+    // Basecamp's own words for a module that isn't there, as plain text or as its refusal object.
+    assert.equal(reply('Module not connected: vesting').code, 'module_missing');
+    assert.equal(reply('{"error":"Call refused","message":"module not loaded: vesting"}').code, 'module_missing');
+    assert.equal(reply('{"error":"Call refused","message":"expected integer at arg0"}').code, 'module_error');
+    // An envelope the vesting module never sends is no answer, not a success.
+    assert.equal(reply('{"success":true,"value":3}').code, 'no_answer');
     assert.equal(reply(undefined).code, 'no_answer');
+});
+
+test('a private account is refused as a new beneficiary before any call', async () => {
+    const h = hostFor({ transfer_call: BUILT });
+    const w = walletFor();
+    const r = await ask((done) => createVest(h, w).transfer(4, 'Private/abc', done));
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'private_beneficiary');
+    assert.equal(h.calls.length, 0);
+    assert.equal(w.proposed.length, 0);
 });
 
 test('a private destination is recognised', () => {
