@@ -562,3 +562,13 @@ fn error_codes_are_stable_and_messages_are_actionable() {
     codes.dedup();
     assert_eq!(codes.len(), errors.len());
 }
+
+#[test]
+fn signalled_total_saturates_on_overflow() {
+    let mut s = milestone(vec![10, 20]);
+    s.kind = ScheduleKind::Milestone {
+        tranches: vec![u128::MAX, 1],
+    };
+    s.signalled = vec![3];
+    assert_eq!(s.signalled_total(), u128::MAX);
+}

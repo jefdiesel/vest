@@ -934,3 +934,8 @@ export function newLine(found, names) {
         : from.slice(0, 2).join(", ") + " and " + (from.length - 2) + " others"
     return "New: " + found.length + " schedule" + (found.length === 1 ? "" : "s") + " from " + clean(people)
 }
+
+/// Whether a `discover` reply changed or added any schedule involving the wallet's accounts.
+export function scanHasChanges(r) {
+    return !!(r && (r.changed || (r.found && r.found.length)))
+}

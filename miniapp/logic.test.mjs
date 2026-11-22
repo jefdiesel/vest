@@ -526,4 +526,31 @@ check("atLocal and partsOf round-trip a local moment", L.partsOf(L.atLocal(2026,
   check("new line: nothing new says nothing", L.newLine([], names), "");
   check("guide and receipt no longer send people to a Receive tab",
     [L.guideSteps("pay", 0), L.guideSteps("receive", 0)].flat().concat([{ text: L.receiptOf({}).share, detail: L.nextLine("create", { id: 1 }) }]).some(x => /open Receive/.test(x.text + x.detail)), false);
+  check("scanHasChanges: true on changed or non-empty found, false otherwise", [
+    L.scanHasChanges({ changed: true, found: [] }),
+    L.scanHasChanges({ changed: false, found: ["S1"] }),
+    L.scanHasChanges({ changed: false, found: [] }),
+    L.scanHasChanges({}),
+    L.scanHasChanges(null)
+  ], [true, true, false, false, false]);
+  {
+    const qml = readFileSync(new URL("./qml/Main.qml", import.meta.url), "utf8");
+    check("Main.qml starts first discover when connected becomes true, not before", [
+      qml.includes("onConnectedChanged:"),
+      qml.includes("if (!connected || !accountsSent || scanStarted) return"),
+      qml.includes('if (!scanStarted && namesState === "connected")')
+    ], [true, true, false]);
+    check("Main.qml refreshes list when discover reports changed or found",
+      qml.includes("if (Logic.scanHasChanges(r)) scanFoundUnread = true"), true);
+    check("Main.qml stops scanTimer, resets scan state, clears module accounts, and drops stale discover replies on disconnect", [
+      qml.includes("scanTimer.stop()"),
+      qml.includes('call("set_accounts", ["[]"], function() {})'),
+      qml.includes("if (!connected || gen !== scanGen)"),
+      qml.includes("if (!connected) { scanTimer.restart(); return }")
+    ], [true, true, true, false]);
+    check("Main.qml hides scanning line during scanProblem and clears scan state in saveNetwork", [
+      qml.includes('visible: root.connected && root.scanText !== "" && root.scanProblem === ""'),
+      /function saveNetwork\(\)[\s\S]{0,160}resetScan\(\)/.test(qml)
+    ], [true, true]);
+  }
 }

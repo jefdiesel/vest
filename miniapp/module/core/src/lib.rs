@@ -102,6 +102,9 @@ impl ModuleBackend for AppBackend {
     fn schedule_address(&self, id: u64) -> Option<AccountId> {
         each!(self, b => b.schedule_address(id))
     }
+    fn schedule_id(&self, a: &AccountId) -> Option<u64> {
+        each!(self, b => b.schedule_id(a))
+    }
     fn knows(&self, a: &AccountId) -> bool {
         each!(self, b => b.knows(a))
     }
@@ -1276,30 +1279,45 @@ impl Module {
                 ));
             }
             let floor = net.vesting_floor.unwrap_or(0);
+            let mut dirty = false;
             let mut state = match discover::ScanState::load(&self.dir) {
                 Some(saved) if saved.chain_id == served && saved.program == b58(&program) => saved,
                 // Another chain (a reset) or another program: start over.
-                _ => discover::ScanState::fresh(&served, &program, floor),
+                _ => {
+                    dirty = true;
+                    discover::ScanState::fresh(&served, &program, floor)
+                }
             };
             let tip = pace
                 .call(&client, "getLastBlockId", json!([]))?
                 .as_u64()
                 .ok_or("getLastBlockId: expected a block number")?;
-            state.tip = tip;
+            if state.last_block.is_some_and(|last| tip < last) {
+                state = discover::ScanState::fresh(&served, &program, floor);
+                dirty = true;
+            }
+            if state.tip != tip {
+                state.tip = tip;
+                dirty = true;
+            }
             let from_block = state.next_block();
             let out_of_time = |started: &std::time::Instant| started.elapsed() >= budget;
             let mut error = None;
             let mut read = 0u64;
+            let mut changed = false;
 
             // Views first (left over from a call that stopped), then block ranges, each range's
-            // views read before the next range; the state is saved after each step.
+            // views read before the next range; the state is saved only when it changed.
             'scan: loop {
+                let mut drained = false;
                 while let Some(account) = state.pending.first().cloned() {
                     if out_of_time(&started) {
                         break 'scan;
                     }
                     let Some(id) = discover::parse_b58(&account) else {
                         state.pending.remove(0);
+                        dirty = true;
+                        drained = true;
                         continue;
                     };
                     pace.wait();
@@ -1307,18 +1325,40 @@ impl Module {
                     pace.mark();
                     match view {
                         Ok(found) => {
-                            let block = state.touched.get(&account).and_then(|t| t.last()).map_or(0, |t| t.0);
+                            let prev = state.schedules.get(&account).cloned();
+                            let was_involved = prev
+                                .as_ref()
+                                .and_then(discover::Known::decoded)
+                                .is_some_and(|s| involves(&s, &mine));
+                            let block = state
+                                .touched
+                                .get(&account)
+                                .and_then(|t| t.last())
+                                .map_or(0, |t| t.0);
                             match found.as_ref().and_then(|s| discover::known_of(s, block)) {
                                 Some(known) => {
+                                    let now_involved =
+                                        known.decoded().is_some_and(|s| involves(&s, &mine));
+                                    let same = prev.as_ref().is_some_and(|p| {
+                                        p.schedule == known.schedule && p.native == known.native
+                                    });
+                                    if (was_involved || now_involved) && !same {
+                                        changed = true;
+                                    }
                                     state.schedules.insert(account.clone(), known);
                                 }
                                 // Being created (no schedule yet): read again when touched again.
                                 None if found.is_some() => {}
                                 None => {
+                                    if was_involved {
+                                        changed = true;
+                                    }
                                     state.schedules.remove(&account);
                                 }
                             }
                             state.pending.remove(0);
+                            dirty = true;
+                            drained = true;
                         }
                         Err(e) => {
                             error = Some(e);
@@ -1326,37 +1366,73 @@ impl Module {
                         }
                     }
                 }
-                state.save(&self.dir)?;
-                let next = state.next_block();
+                if drained {
+                    state.save(&self.dir)?;
+                    dirty = false;
+                }
+                let Some(next) = state.next_block() else {
+                    break;
+                };
                 if next > tip || read >= max || out_of_time(&started) {
                     break;
                 }
-                let end = (next + RANGE_LEN - 1).min(tip).min(next + (max - read) - 1);
-                let blocks = match pace
-                    .call(&client, "getBlockRange", json!([next, end]))
-                    .and_then(|answer| discover::decode_blocks(&answer))
-                {
-                    Ok(blocks) => blocks,
-                    Err(e) => {
-                        error = Some(e);
-                        break;
+                let mut end = next
+                    .saturating_add(RANGE_LEN - 1)
+                    .min(tip)
+                    .min(next.saturating_add(max - read - 1));
+                let blocks = loop {
+                    match pace
+                        .call(&client, "getBlockRange", json!([next, end]))
+                        .and_then(|answer| discover::decode_blocks(&answer))
+                    {
+                        Ok(blocks) => break blocks,
+                        Err(_) if end > next && !out_of_time(&started) => {
+                            let span = end - next + 1;
+                            let half = (span / 2).max(1);
+                            end = next + half - 1;
+                        }
+                        Err(e) => {
+                            error = Some(e);
+                            break 'scan;
+                        }
                     }
                 };
+                let mut returned = std::collections::BTreeSet::new();
                 for block in &blocks {
                     let id = block.header.block_id;
                     if id < next || id > end {
                         error = Some(format!("getBlockRange [{next}, {end}] answered block {id}"));
                         break 'scan;
                     }
-                    for (account, tx) in discover::vest_accounts(block, &program) {
-                        state.touch(&b58(&account), id, &tx);
+                    returned.insert(id);
+                }
+                if !returned.contains(&next) {
+                    error = Some(format!(
+                        "getBlockRange [{next}, {end}] did not return block {next}"
+                    ));
+                    break 'scan;
+                }
+                let mut hi = next;
+                while hi < end && returned.contains(&(hi + 1)) {
+                    hi += 1;
+                }
+                for block in &blocks {
+                    let id = block.header.block_id;
+                    if id <= hi {
+                        for (account, tx) in discover::vest_accounts(block, &program) {
+                            state.touch(&b58(&account), id, &tx);
+                        }
                     }
                 }
-                read += end - next + 1;
-                state.last_block = Some(end);
+                read = read.saturating_add(hi - next + 1);
+                state.last_block = Some(hi);
                 state.save(&self.dir)?;
+                dirty = false;
             }
-            state.save(&self.dir)?;
+            if dirty {
+                state.save(&self.dir)?;
+                dirty = false;
+            }
 
             // Every known schedule against the accounts of now: one shared since, or one that
             // moved to you, is imported even when no new block mentions it.
@@ -1365,56 +1441,88 @@ impl Module {
             let mut incoming = 0;
             let mut imports = 0;
             let mut imports_left = false;
-            let candidates: Vec<(String, Schedule)> = state
-                .schedules
-                .iter()
-                .filter_map(|(a, k)| k.decoded().map(|s| (a.clone(), s)))
-                .collect();
-            for (address, schedule) in candidates {
-                let pays_me = mine.contains(&schedule.beneficiary);
-                if pays_me {
-                    incoming += 1;
-                }
-                let roles = pays_me
-                    || mine.contains(&schedule.creator)
-                    || mine.contains(&schedule.cancel_authority)
-                    || mine.contains(&schedule.milestone_authority);
-                let Some(account) = discover::parse_b58(&address) else { continue };
-                if !roles || state.imported.contains(&address) {
-                    continue;
-                }
-                let backend = self.client()?.backend_mut();
-                if backend.knows(&account) {
-                    state.imported.insert(address);
-                    continue;
-                }
-                // An import reads the account once more: paced like the scan, a few per call.
-                if imports >= discover::IMPORTS_PER_CALL {
-                    imports_left = true;
-                    continue;
-                }
-                imports += 1;
-                pace.wait();
-                let imported = self.client()?.backend_mut().import_account(account);
-                pace.mark();
-                match imported {
-                    Ok(id) => {
-                        if pays_me {
-                            found.push(json!(address));
-                            new_rows.push(json!({
-                                "id": id, "address": hex::encode(account), "address_base58": address,
-                                "creator": hex::encode(schedule.creator),
-                            }));
-                        }
-                        state.imported.insert(address);
+            if error.is_none() {
+                let candidates: Vec<(String, Schedule)> = state
+                    .schedules
+                    .iter()
+                    .filter_map(|(a, k)| k.decoded().map(|s| (a.clone(), s)))
+                    .collect();
+                for (address, schedule) in candidates {
+                    let pays_me = mine.contains(&schedule.beneficiary);
+                    if pays_me {
+                        incoming += 1;
+                    } else if state.announced.remove(&address) {
+                        dirty = true;
                     }
-                    Err(e) => {
-                        error.get_or_insert(e);
+                    let roles = involves(&schedule, &mine);
+                    let Some(account) = discover::parse_b58(&address) else {
+                        continue;
+                    };
+                    if !roles {
+                        continue;
+                    }
+                    let backend = self.client()?.backend_mut();
+                    if backend.knows(&account) {
+                        let local_id = backend.schedule_id(&account);
+                        let previously_imported = state.imported.contains(&address);
+                        if state.imported.insert(address.clone()) {
+                            dirty = true;
+                        }
+                        if pays_me && !state.announced.contains(&address) {
+                            state.announced.insert(address.clone());
+                            dirty = true;
+                            if previously_imported {
+                                changed = true;
+                                found.push(json!(address));
+                                new_rows.push(json!({
+                                    "id": local_id,
+                                    "address": hex::encode(account),
+                                    "address_base58": address,
+                                    "creator": hex::encode(schedule.creator),
+                                }));
+                            }
+                        }
+                        continue;
+                    }
+                    // An import reads the account once more: paced like the scan, a few per call.
+                    if imports >= discover::IMPORTS_PER_CALL || out_of_time(&started) {
+                        imports_left = true;
+                        continue;
+                    }
+                    imports += 1;
+                    pace.wait();
+                    let imported = self.client()?.backend_mut().import_account(account);
+                    pace.mark();
+                    match imported {
+                        Ok(id) => {
+                            changed = true;
+                            if state.imported.insert(address.clone()) {
+                                dirty = true;
+                            }
+                            if pays_me && !state.announced.contains(&address) {
+                                state.announced.insert(address.clone());
+                                dirty = true;
+                                found.push(json!(address));
+                                new_rows.push(json!({
+                                    "id": id,
+                                    "address": hex::encode(account),
+                                    "address_base58": address,
+                                    "creator": hex::encode(schedule.creator),
+                                }));
+                            }
+                        }
+                        Err(e) => {
+                            error.get_or_insert(e);
+                            imports_left = true;
+                            break;
+                        }
                     }
                 }
             }
-            state.save(&self.dir)?;
-            if !found.is_empty() {
+            if dirty {
+                state.save(&self.dir)?;
+            }
+            if changed || !found.is_empty() {
                 self.forget_reads();
             }
             if let Some(error) = error {
@@ -1422,6 +1530,7 @@ impl Module {
                 failed["to_block"] = json!(state.last_block);
                 failed["tip"] = json!(tip);
                 failed["found"] = json!(found);
+                failed["changed"] = json!(changed);
                 return Ok(failed.to_string());
             }
             let to_block = state.last_block;
@@ -1430,9 +1539,10 @@ impl Module {
                 "from_block": from_block,
                 "to_block": to_block,
                 "tip": tip,
-                "done": state.pending.is_empty() && state.next_block() > tip && !imports_left,
+                "done": state.pending.is_empty() && state.next_block().map_or(true, |n| n > tip) && !imports_left,
                 "found": found,
                 "new": new_rows,
+                "changed": changed,
                 "incoming": incoming,
                 "known": state.schedules.len(),
                 "pending": state.pending.len(),
@@ -1494,6 +1604,13 @@ impl Module {
 
 /// Blocks per `getBlockRange` of a scan.
 const RANGE_LEN: u64 = discover::RANGE;
+
+fn involves(s: &Schedule, mine: &[AccountId]) -> bool {
+    mine.contains(&s.beneficiary)
+        || mine.contains(&s.creator)
+        || mine.contains(&s.cancel_authority)
+        || mine.contains(&s.milestone_authority)
+}
 
 
 #[cfg(all(test, not(feature = "lez")))]

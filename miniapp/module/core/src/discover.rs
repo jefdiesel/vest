@@ -81,6 +81,8 @@ pub struct ScanState {
     pub schedules: BTreeMap<String, Known>,
     /// Schedules this scan imported (base58), so it never imports one twice.
     pub imported: BTreeSet<String>,
+    /// Schedules already announced as paying the wallet (`found` / `new`), base58.
+    pub announced: BTreeSet<String>,
 }
 
 impl ScanState {
@@ -105,18 +107,27 @@ impl ScanState {
         (state.format == FORMAT).then_some(state)
     }
 
-    /// Written to a temporary name, then renamed: never half a file.
+    /// Written to a temporary name, synced, then renamed: never half a file.
     pub fn save(&self, dir: &Path) -> Result<(), String> {
+        use std::io::Write as _;
         std::fs::create_dir_all(dir).map_err(|e| format!("could not save the scan: {e}"))?;
         let bytes = serde_json::to_vec(self).map_err(|e| e.to_string())?;
         let tmp = dir.join(format!("{STATE_FILE}.tmp"));
-        std::fs::write(&tmp, bytes).map_err(|e| format!("could not save the scan: {e}"))?;
+        let mut file =
+            std::fs::File::create(&tmp).map_err(|e| format!("could not save the scan: {e}"))?;
+        file.write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|e| format!("could not save the scan: {e}"))?;
+        drop(file);
         std::fs::rename(&tmp, Self::path(dir)).map_err(|e| format!("could not save the scan: {e}"))
     }
 
-    /// The first block the next call reads.
-    pub fn next_block(&self) -> u64 {
-        self.last_block.map_or(self.floor, |b| b + 1).max(self.floor)
+    /// The first block the next call reads, or `None` after block `u64::MAX`.
+    pub fn next_block(&self) -> Option<u64> {
+        match self.last_block {
+            None => Some(self.floor),
+            Some(b) => b.checked_add(1).map(|n| n.max(self.floor)),
+        }
     }
 
     pub fn touch(&mut self, account: &str, block: u64, tx: &str) {

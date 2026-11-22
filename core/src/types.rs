@@ -125,7 +125,7 @@ impl Schedule {
                 .enumerate()
                 .filter(|(i, _)| self.is_signalled(*i))
                 .map(|(_, amount)| *amount)
-                .sum(),
+                .fold(0u128, u128::saturating_add),
             _ => 0,
         }
     }

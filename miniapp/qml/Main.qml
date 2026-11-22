@@ -44,6 +44,17 @@ Item {
     // Names Wallet 0.18+: its calls may read the network clock
     readonly property bool namesCanCall: wallet.features.indexOf("call_reads_clock") >= 0
     readonly property bool connected: namesState === "connected" && chainOpen
+    onConnectedChanged: {
+        if (connected) {
+            startScan()
+        } else {
+            resetScan()
+            if (namesState !== "connected" && accountsSent) {
+                accountsSent = false
+                call("set_accounts", ["[]"], function() {})
+            }
+        }
+    }
     // Creates, cancels, milestones and transfers need Names Wallet 0.18+ (calls that read the clock).
     readonly property bool canWrite: namesCanCall
 
@@ -83,6 +94,8 @@ Item {
     property var newFound: []                  // schedules a scan added: [{id, address, creator}]
     property bool scanFoundUnread: false       // a scan added schedules the list hasn't read yet
     property real scanReadAt: 0                // when a scan last made the list read again (ms)
+    property int scanGen: 0                    // bumped on disconnect or network change to drop stale replies
+    property bool accountsSent: false          // set_accounts finished for the current connection
 
     // ── Forms ───────────────────────────────────────────────────────────────────────
     property string cCreator: ""
@@ -200,12 +213,22 @@ Item {
         wallet.balances(function(b) {
             if (gen !== balanceGen) return
             var rows = Logic.namesAccounts({ accounts: balanceAccounts }, b)
-            call("set_accounts", [JSON.stringify(rows)], function() { readChain() })
+            call("set_accounts", [JSON.stringify(rows)], function() {
+                if (gen !== balanceGen) return
+                accountsSent = true
+                startScan()
+                readChain()
+            })
             if (!Logic.balancesKnown(rows)) scheduleBalanceRetry(gen)
         }, function() {
             if (gen !== balanceGen) return
             var rows = Logic.namesAccounts({ accounts: balanceAccounts }, [])
-            call("set_accounts", [JSON.stringify(rows)], function() { readChain() })
+            call("set_accounts", [JSON.stringify(rows)], function() {
+                if (gen !== balanceGen) return
+                accountsSent = true
+                startScan()
+                readChain()
+            })
             if (!Logic.balancesKnown(rows)) scheduleBalanceRetry(gen)
         })
     }
@@ -283,22 +306,54 @@ Item {
                 autoTabDone = true
                 if (tab === "claimable" && claimableSchedules.length === 0 && unvestedSchedules.length > 0) tab = "unvested"
             }
-            if (!scanStarted && namesState === "connected") { scanStarted = true; discoverOnce() }
         }, 120000)
+    }
+
+    function resetScan() {
+        scanTimer.stop()
+        scanGen += 1
+        scanStarted = false
+        scan = null
+        newFound = []
+        scanProblem = ""
+        scanFoundUnread = false
+    }
+
+    function startScan() {
+        if (!connected || !accountsSent || scanStarted) return
+        scanStarted = true
+        discoverOnce()
+    }
+
+    function onDisconnected() {
+        stopBalanceRetry()
+        resetScan()
+        accountsSent = false
+        accounts = []
+        schedules = []
+        call("set_accounts", ["[]"], function() {})
     }
 
     /// Look for schedules on the chain: one `discover` call at a time, the next as soon as the
     /// last one answers, until the scan reaches the chain's tip; then again every minute. A
-    /// schedule it adds is read with the rest (`list`), and said in one line.
+    /// schedule it adds or changes is read with the rest (`list`), and new ones paying you are
+    /// said in one line.
     function discoverOnce() {
-        if (scanBusy) return
-        if (!connected) { scanTimer.restart(); return }
+        if (scanBusy || !connected) return
         scanBusy = true
+        var gen = scanGen
         call("discover", ["2000"], function(r) {
             scanBusy = false
-            // New schedules are read with the rest (`list`): when the scan is done, or at most
+            if (!connected || gen !== scanGen) {
+                if (connected && accountsSent) {
+                    scanStarted = true
+                    Qt.callLater(discoverOnce)
+                }
+                return
+            }
+            // New or changed schedules are read with the rest (`list`): when the scan is done, or at most
             // every 30 s while it runs (each read asks the chain for every schedule).
-            if (r.found && r.found.length) scanFoundUnread = true
+            if (Logic.scanHasChanges(r)) scanFoundUnread = true
             if (scanFoundUnread && (r.done || !r.ok || Date.now() - scanReadAt > 30000)) {
                 scanFoundUnread = false
                 scanReadAt = Date.now()
@@ -381,6 +436,7 @@ Item {
         say("")
         busy = true
         workingOn = "settings"
+        resetScan()
         var patch = {
             network_file: networkFileField.text.trim(), rpc: rpcField.text.trim(), chain_id: chainField.text.trim(),
             program: programField.text.trim(), token_program: tokenProgramField.text.trim(),
@@ -794,7 +850,7 @@ Item {
             // Looking for schedules on the chain: a quiet line, and one when new ones arrive.
             Text {
                 textFormat: Text.PlainText
-                visible: root.connected && root.scanText !== ""
+                visible: root.connected && root.scanText !== "" && root.scanProblem === ""
                 Layout.fillWidth: true
                 text: root.scanText
                 color: look.dim
@@ -1216,7 +1272,7 @@ Item {
                 Heading { text: "Signing" }
                 Body { text: "Vest signs through Names Wallet: you approve every payment and claim in Names Wallet. Vest has no signer of its own." }
                 FactRow { look: root.look; visible: wallet.current !== null; key: "Wallet"; value: wallet.current ? Logic.clean(wallet.current.display_name) + " (" + Logic.clean(wallet.current.module) + ")" : "" }
-                Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.stopBalanceRetry(); root.accounts = []; root.schedules = [] }, function(r) { root.say(r.error, true) }) }
+                Link { look: root.look; visible: root.namesState === "connected"; text: "Disconnect Names Wallet"; onPressed: wallet.disconnect(function() { root.onDisconnected() }, function(r) { root.say(r.error, true) }) }
                 Link { look: root.look; visible: wallet.wallets.length > 1; text: "Use another wallet"; onPressed: { wallet.forgetWallet(); root.refresh() } }
             }
 

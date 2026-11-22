@@ -414,8 +414,16 @@ impl ModuleBackend for NamesBackend {
         self.address(id).ok()
     }
 
-    fn knows(&self, account: &AccountId) -> bool {
+    fn schedule_id(&self, account: &AccountId) -> Option<ScheduleId> {
         let hex = hex::encode(account);
-        self.map.ids.values().any(|known| *known == hex)
+        self.map
+            .ids
+            .iter()
+            .find(|(_, known)| **known == hex)
+            .map(|(id, _)| *id)
+    }
+
+    fn knows(&self, account: &AccountId) -> bool {
+        self.schedule_id(account).is_some()
     }
 }
