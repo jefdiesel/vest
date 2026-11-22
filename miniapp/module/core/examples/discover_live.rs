@@ -3,9 +3,8 @@
 //!
 //!   cargo run -p vesting-module-core --example discover_live -- <rpc> <chain id> <floor> <account>...
 //!
-//! e.g. through a tunnel to the Mini's local RPC:
-//!   ssh -N -L 13290:127.0.0.1:3290 minim4 &
-//!   cargo run -p vesting-module-core --example discover_live -- http://127.0.0.1:13290 \
+//! e.g. against a sequencer's RPC on this machine:
+//!   cargo run -p vesting-module-core --example discover_live -- http://127.0.0.1:3290 \
 //!     2da7f7df…5374 38700 5g78oRK2ngo1yBVZ2LvrSHLmw6qcieH52FL7wa3qXKtd
 
 use serde_json::{json, Value};
