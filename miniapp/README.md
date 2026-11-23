@@ -1,6 +1,6 @@
 # Vest mini-app for Basecamp
 
-The current packages are `vesting_ui` 0.6.0 and `vesting` 0.5.0 on macOS Apple silicon. Linux is
+The current packages are `vesting_ui` 0.6.3 and `vesting` 0.5.3 on macOS Apple silicon. Linux is
 to be rebuilt once from the final Mac version.
 
 Two Basecamp packages:

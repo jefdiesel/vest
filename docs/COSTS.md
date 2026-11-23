@@ -34,10 +34,14 @@ Notes:
 - A private claim is a privacy-preserving transaction: the cycles above are its public part; the
   private part is proven by the claimant. With real proofs on the Mac mini (local prover, 4
   threads) a native private claim of the earlier spike program (same flow, smaller program) took
-  458 s and 725 s on the public rc3 chain (peak footprint about 9.4 GB). This program's private
-  claims have run with dev-mode receipts only so far; a token private claim (holding
-  initialisation + sponsor draw) has not been proven for real yet. The fee of a private transaction is paid inside the proof by the private account
-  (from what it receives for native LEZ; from the creator-funded sponsor float for a token).
+  458 s and 725 s on the public rc3 chain (peak footprint about 9.4 GB). On this program, a
+  private token claim into a fresh account (holding initialisation + sponsor draw) ran with a real
+  proof on our public rc3 chain (`c5d78291…`, block 39066, about 10 minutes on a Mac mini with 4
+  threads — 600 s between the previous step in block 39026 and the claim, proving and inclusion
+  together; `docs/live/pub-full-20261120.txt`). This program's private native claim has run with
+  dev-mode receipts only so far (in CI). The fee of a private transaction is paid inside the proof
+  by the private account (from what it receives for native LEZ; from the creator-funded sponsor
+  float for a token).
 
 ## Batch create
 

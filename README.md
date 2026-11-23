@@ -235,7 +235,7 @@ smoke. Deployments are updatable (the header key stays in the deploying wallet) 
 
 | Chain | Program | Image | Notes |
 |---|---|---|---|
-| Public rc3 demo chain (lez.nameswallet.app), 2026-11-20 | `1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d` | `2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6` | updatable; native-LEZ smoke passed |
+| Public rc3 demo chain (lez.nameswallet.app), 2026-11-20 | `1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d` | `2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6` | updatable; native-LEZ smoke (`docs/live/pub-smoke-program-20261120.txt`) and token / real-proof private token claim / batch run (`docs/live/pub-full-20261120.txt`) passed |
 
 Events: every transition emits one `ProgramEvent` (selector = first 8 bytes of
 `SHA256("vesting::<Variant>")`, data = borsh `VestingEvent { schedule, event }` with the core

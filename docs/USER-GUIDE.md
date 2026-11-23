@@ -51,7 +51,7 @@ unlocked** and pick the day, hour and minute in your local time.
    **From** shows who made the schedule. **Show** reveals the full address, **Copy** copies it, and
    **Open in Names** opens that name or address in Names Wallet when it is connected. The
    **Schedule code** row has **Copy schedule code**.
-4. **Claim to your public account, or privately**. Press **Check claim**. Vest shows the amount and
+4. **Claim to your public account**. Press **Check claim**. Vest shows the amount and
    where it goes. A public claim pays your own account, in the open: anyone can see the amount and
    where it went.
 5. **Approve it in Names Wallet**. Press **Claim in Names Wallet**; Vest opens Names, which shows
