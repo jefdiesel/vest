@@ -10,6 +10,10 @@ on:
 jobs:
   guests:
     runs-on: ubuntu-latest
+    env:
+      # The builder image with RISC Zero's Rust 1.97, the toolchain the deployed guests were built
+      # with (cargo-risczero 3.0.5's default image ships Rust 1.88, too old for Cargo.lock).
+      RISC0_DOCKER_CONTAINER_TAG: r0.1.97.0
     steps:
       - uses: actions/checkout@v4
       - name: Install rzup (risc0 toolchain)
