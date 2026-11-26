@@ -15,7 +15,7 @@ support for this program is in `docs/SPEL-GAP.md`.
 
 | Chain | Program id (hex) | Image id | Updatable |
 |---|---|---|---|
-| Public rc3 demo chain (lez.nameswallet.app), 2026-11-20 | `1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d` | `2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6` | yes (loader header flag 0) |
+| Public rc3 demo chain (lez.nameswallet.app), 2026-11-20, updated in place 2026-11-26 to the reproducible Docker build | `1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d` | `6840821cf8104b4d027b97f52d2cf3d2adcf84d95a052e4e5704fe7fd299b81e` | yes (loader header flag 0) |
 
 Token schedules use the 0.4 fungible token program of logos-blockchain/lez-programs (`cad71fc`,
 `programs/token`), deployed wherever the token lives.

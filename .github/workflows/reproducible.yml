@@ -42,9 +42,10 @@ jobs:
               echo "| $g | \`$id\` |"
             done
             echo
-            echo "Deployed (docs/IDL.md): Vest image \`2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6\`."
+            dep=$(grep '1a0cd691626eed61f82296bfd9d89609453a8fa8c947994a70dd1cbaa661327d' docs/IDL.md | grep -oE '[0-9a-f]{64}' | sed -n 2p)
+            echo "Deployed (docs/IDL.md): Vest image \`$dep\`."
             v=$(grep -o -i -E 'ImageID: [0-9a-f]{64}' vesting_guest.log | head -1 | awk '{print $2}')
-            if [ "$v" = "2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6" ]; then
+            if [ -n "$dep" ] && [ "$v" = "$dep" ]; then
               echo "**Match:** the Vest image built from this commit is the one deployed."
             else
               echo "**Differs:** the Vest image built from this commit is not the deployed one (the deployment may predate this commit, or was not built in Docker)."
