@@ -1,0 +1,48 @@
+# Reproducible build of the on-chain guests (Vest and the token program) in RISC Zero's Docker
+# builder, on a plain x86 runner. Prints each image id and compares it with the deployment listed
+# in docs/IDL.md, so anyone can check that the program on chain is the code in this repository.
+name: reproducible-build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['methods/**', 'program/**', 'core/**', 'vendor/**', 'Cargo.lock', '.github/workflows/reproducible.yml']
+jobs:
+  guests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rzup (risc0 toolchain)
+        run: |
+          curl -L https://risczero.com/install | bash
+          echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.risc0/bin:$PATH"
+          rzup install cargo-risczero 3.0.5
+          rzup install rust
+      - name: Build the guests in RISC Zero's Docker builder
+        run: |
+          set -o pipefail
+          for g in vesting_guest token_guest; do
+            echo "== $g"
+            cargo risczero build --manifest-path methods/$g/Cargo.toml 2>&1 | tee "$g.log"
+          done
+      - name: Compare with the deployment in docs/IDL.md
+        run: |
+          {
+            echo "## Reproducible guest build"
+            echo
+            echo "| Guest | Image id built here |"
+            echo "|---|---|"
+            for g in vesting_guest token_guest; do
+              id=$(grep -o -i -E 'ImageID: [0-9a-f]{64}' "$g.log" | head -1 | awk '{print $2}')
+              echo "| $g | \`$id\` |"
+            done
+            echo
+            echo "Deployed (docs/IDL.md): Vest image \`2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6\`."
+            v=$(grep -o -i -E 'ImageID: [0-9a-f]{64}' vesting_guest.log | head -1 | awk '{print $2}')
+            if [ "$v" = "2feaa8d38d50ef1e5ba5269a7bff6f9983928b4fc627c4d0780c2342d6008ab6" ]; then
+              echo "**Match:** the Vest image built from this commit is the one deployed."
+            else
+              echo "**Differs:** the Vest image built from this commit is not the deployed one (the deployment may predate this commit, or was not built in Docker)."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
